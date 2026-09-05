@@ -472,25 +472,41 @@ function App() {
     }
   };
 
+  const getTcgQuery = (speciesName: string) => {
+    const s = speciesName.toLowerCase().trim();
+    if (s === 'ho-oh') return 'ho-oh';
+    if (s === 'porygon-z') return 'porygon-z';
+    if (s.startsWith('mr-')) return s.replace('mr-', 'mr. ');
+    if (s.startsWith('tapu-')) return s.replace('-', ' ');
+    if (s === 'mime-jr') return 'mime jr.';
+    if (s === 'type-null') return 'type: null';
+    if (s.includes('-')) return s.replace(/-/g, ' ');
+    return s;
+  };
+
   // Fetch TCG cards in background from TCGdex API
   const fetchTcgCards = async (pokeName: string) => {
     setTcgLoading(true);
     setTcgCards([]);
     try {
-      const clean = pokeName.split('-')[0].toLowerCase();
-      let res = await fetch(`https://api.tcgdex.net/v2/es/cards?name=${clean}`);
+      const clean = getTcgQuery(pokeName);
+      let res = await fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(clean)}`);
       let cardsData: TcgCardBrief[] = [];
       if (res.ok) {
         cardsData = await res.json();
       }
       if (!Array.isArray(cardsData) || cardsData.length === 0) {
-        const enRes = await fetch(`https://api.tcgdex.net/v2/en/cards?name=${clean}`);
+        const enRes = await fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(clean)}`);
         if (enRes.ok) {
           cardsData = await enRes.json();
         }
       }
       if (Array.isArray(cardsData)) {
-        const validCards = cardsData.filter((c) => c.image);
+        // Strict word boundary filter to eliminate false substring positives (e.g. Hoppip when searching Ho-Oh, Mewtwo when searching Mew)
+        const escaped = clean.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\s+/g, '[\\s\\-\\.]*');
+        const pattern = new RegExp(`(^|[^a-zA-Z0-9])${escaped}([^a-zA-Z0-9]|$)`, 'i');
+
+        const validCards = cardsData.filter((c) => c.image && pattern.test(c.name));
         setTcgCards(validCards);
       }
     } catch (err) {
