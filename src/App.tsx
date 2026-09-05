@@ -13,6 +13,15 @@ interface PokemonStat {
   };
 }
 
+interface PokemonAbility {
+  ability: {
+    name: string;
+    url: string;
+  };
+  is_hidden: boolean;
+  slot: number;
+}
+
 interface Pokemon {
   id: number;
   name: string;
@@ -42,6 +51,7 @@ interface Pokemon {
     name: string;
     url: string;
   }[];
+  abilities?: PokemonAbility[];
 }
 
 interface PokemonFormDetail {
@@ -116,7 +126,234 @@ const TYPE_COLORS: Record<string, { bg: string; text: string; border: string; gl
   ghost: { bg: 'bg-violet-500/20', text: 'text-violet-400', border: 'border-violet-500/30', glow: 'shadow-violet-500/25' },
   dragon: { bg: 'bg-purple-600/20', text: 'text-purple-400', border: 'border-purple-600/30', glow: 'shadow-purple-600/25' },
   steel: { bg: 'bg-zinc-500/20', text: 'text-zinc-300', border: 'border-zinc-500/30', glow: 'shadow-zinc-500/20' },
+  dark: { bg: 'bg-stone-700/20', text: 'text-stone-300', border: 'border-stone-600/30', glow: 'shadow-stone-600/20' },
   fairy: { bg: 'bg-rose-400/20', text: 'text-rose-300', border: 'border-rose-400/30', glow: 'shadow-rose-400/25' },
+};
+
+const TYPE_HEX_COLORS: Record<string, string> = {
+  normal: '#94a3b8',
+  fire: '#f43f5e',
+  water: '#0ea5e9',
+  grass: '#10b981',
+  electric: '#f59e0b',
+  ice: '#06b6d4',
+  fighting: '#ef4444',
+  poison: '#d946ef',
+  ground: '#d97706',
+  flying: '#818cf8',
+  psychic: '#ec4899',
+  bug: '#84cc16',
+  rock: '#a8a29e',
+  ghost: '#8b5cf6',
+  dragon: '#7c3aed',
+  steel: '#71717a',
+  dark: '#57534e',
+  fairy: '#f472b6',
+};
+
+const TYPE_TRANSLATIONS: Record<string, string> = {
+  normal: 'Normal',
+  fire: 'Fuego',
+  water: 'Agua',
+  grass: 'Planta',
+  electric: 'Eléctrico',
+  ice: 'Hielo',
+  fighting: 'Lucha',
+  poison: 'Veneno',
+  ground: 'Tierra',
+  flying: 'Volador',
+  psychic: 'Psíquico',
+  bug: 'Bicho',
+  rock: 'Roca',
+  ghost: 'Fantasma',
+  dragon: 'Dragón',
+  steel: 'Acero',
+  dark: 'Siniestro',
+  fairy: 'Hada',
+};
+
+const ALL_TYPES = [
+  'normal', 'fire', 'water', 'grass', 'electric', 'ice',
+  'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug',
+  'rock', 'ghost', 'dragon', 'steel', 'dark', 'fairy'
+];
+
+const TYPE_CHART: Record<string, Record<string, number>> = {
+  normal: { rock: 0.5, ghost: 0, steel: 0.5 },
+  fire: { fire: 0.5, water: 0.5, grass: 2, ice: 2, bug: 2, rock: 0.5, dragon: 0.5, steel: 2 },
+  water: { fire: 2, water: 0.5, grass: 0.5, ground: 2, rock: 2, dragon: 0.5 },
+  grass: { fire: 0.5, water: 2, grass: 0.5, poison: 0.5, ground: 2, flying: 0.5, bug: 0.5, rock: 2, dragon: 0.5, steel: 0.5 },
+  electric: { water: 2, grass: 0.5, electric: 0.5, ground: 0, flying: 2, dragon: 0.5 },
+  ice: { fire: 0.5, water: 0.5, grass: 2, ice: 0.5, ground: 2, flying: 2, dragon: 2, steel: 0.5 },
+  fighting: { normal: 2, ice: 2, poison: 0.5, flying: 0.5, psychic: 0.5, bug: 0.5, rock: 2, ghost: 0, dark: 2, steel: 2, fairy: 0.5 },
+  poison: { grass: 2, poison: 0.5, ground: 0.5, rock: 0.5, ghost: 0.5, steel: 0, fairy: 2 },
+  ground: { fire: 2, grass: 0.5, electric: 2, poison: 2, flying: 0, bug: 0.5, rock: 2, steel: 2 },
+  flying: { grass: 2, electric: 0.5, fighting: 2, bug: 2, rock: 0.5, steel: 0.5 },
+  psychic: { fighting: 2, poison: 2, psychic: 0.5, dark: 0, steel: 0.5 },
+  bug: { fire: 0.5, grass: 2, fighting: 0.5, poison: 0.5, flying: 0.5, psychic: 2, ghost: 0.5, dark: 2, steel: 0.5, fairy: 0.5 },
+  rock: { fire: 2, ice: 2, fighting: 0.5, ground: 0.5, flying: 2, bug: 2, steel: 0.5 },
+  ghost: { normal: 0, psychic: 2, ghost: 2, dark: 0.5 },
+  dragon: { dragon: 2, steel: 0.5, fairy: 0 },
+  steel: { fire: 0.5, water: 0.5, electric: 0.5, ice: 2, rock: 2, steel: 0.5, fairy: 2 },
+  dark: { fighting: 0.5, psychic: 2, ghost: 2, dark: 0.5, fairy: 0.5 },
+  fairy: { fire: 0.5, fighting: 2, poison: 0.5, dragon: 2, dark: 2, steel: 0.5 },
+};
+
+interface TypeMatchups {
+  quadWeak: string[];
+  doubleWeak: string[];
+  halfResist: string[];
+  quadResist: string[];
+  immune: string[];
+}
+
+const calculateTypeMatchups = (defendingTypes: string[]): TypeMatchups => {
+  const result: TypeMatchups = {
+    quadWeak: [],
+    doubleWeak: [],
+    halfResist: [],
+    quadResist: [],
+    immune: [],
+  };
+
+  if (!defendingTypes || defendingTypes.length === 0) return result;
+
+  ALL_TYPES.forEach((attacker) => {
+    let multiplier = 1;
+    defendingTypes.forEach((defender) => {
+      const defFactor = TYPE_CHART[attacker]?.[defender] !== undefined ? TYPE_CHART[attacker][defender] : 1;
+      multiplier *= defFactor;
+    });
+
+    if (multiplier === 0) result.immune.push(attacker);
+    else if (multiplier >= 4) result.quadWeak.push(attacker);
+    else if (multiplier >= 2) result.doubleWeak.push(attacker);
+    else if (multiplier <= 0.25) result.quadResist.push(attacker);
+    else if (multiplier <= 0.5) result.halfResist.push(attacker);
+  });
+
+  return result;
+};
+
+const RADAR_STATS = [
+  { key: 'hp', label: 'HP' },
+  { key: 'attack', label: 'Ataque' },
+  { key: 'defense', label: 'Defensa' },
+  { key: 'speed', label: 'Velocidad' },
+  { key: 'special-defense', label: 'Def. Esp.' },
+  { key: 'special-attack', label: 'At. Esp.' },
+];
+
+const StatRadarChart = ({ stats, primaryColorHex = '#f43f5e' }: { stats: PokemonStat[]; primaryColorHex?: string }) => {
+  const size = 280;
+  const cx = size / 2;
+  const cy = size / 2;
+  const maxRadius = 82;
+  const levels = [0.2, 0.4, 0.6, 0.8, 1.0];
+
+  const getPolygonPoints = (radius: number) => {
+    return Array.from({ length: 6 }).map((_, i) => {
+      const angle = (Math.PI * 2 / 6) * i - Math.PI / 2;
+      return `${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`;
+    }).join(' ');
+  };
+
+  const coords = RADAR_STATS.map((stat, i) => {
+    const val = stats.find((s) => s.stat.name === stat.key)?.base_stat || 0;
+    const clamped = Math.min(Math.max(val, 15), 255);
+    const r = (clamped / 255) * maxRadius;
+    const angle = (Math.PI * 2 / 6) * i - Math.PI / 2;
+    return {
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle),
+      val,
+      label: stat.label,
+      labelX: cx + (maxRadius + 24) * Math.cos(angle),
+      labelY: cy + (maxRadius + 24) * Math.sin(angle),
+    };
+  });
+
+  const dataPoints = coords.map((c) => `${c.x},${c.y}`).join(' ');
+
+  return (
+    <div className="flex flex-col items-center justify-center relative p-2">
+      <svg width={size} height={size} className="overflow-visible select-none">
+        {/* Concentric Hexagons */}
+        {levels.map((lvl, idx) => (
+          <polygon
+            key={idx}
+            points={getPolygonPoints(maxRadius * lvl)}
+            fill="none"
+            stroke="#334155"
+            strokeWidth="1"
+            strokeDasharray={idx === levels.length - 1 ? 'none' : '3 3'}
+            opacity={0.6}
+          />
+        ))}
+
+        {/* Radiating Axis Lines */}
+        {Array.from({ length: 6 }).map((_, i) => {
+          const angle = (Math.PI * 2 / 6) * i - Math.PI / 2;
+          const x2 = cx + maxRadius * Math.cos(angle);
+          const y2 = cy + maxRadius * Math.sin(angle);
+          return (
+            <line
+              key={i}
+              x1={cx}
+              y1={cy}
+              x2={x2}
+              y2={y2}
+              stroke="#334155"
+              strokeWidth="1"
+              opacity={0.7}
+            />
+          );
+        })}
+
+        {/* Data Polygon */}
+        <polygon
+          points={dataPoints}
+          fill={primaryColorHex}
+          fillOpacity="0.35"
+          stroke={primaryColorHex}
+          strokeWidth="2.5"
+          className="transition-all duration-700"
+        />
+
+        {/* Vertex Points & Labels */}
+        {coords.map((c, i) => (
+          <g key={i}>
+            <circle
+              cx={c.x}
+              cy={c.y}
+              r="4"
+              fill={primaryColorHex}
+              stroke="#0f172a"
+              strokeWidth="2"
+            />
+            <text
+              x={c.labelX}
+              y={c.labelY}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="text-[10px] font-bold fill-slate-400 font-sans"
+            >
+              {c.label}
+            </text>
+            <text
+              x={c.labelX}
+              y={c.labelY + 11}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="text-[11px] font-black fill-white font-mono"
+            >
+              {c.val}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
 };
 
 const STAT_LABELS: Record<string, string> = {
@@ -318,8 +555,8 @@ function App() {
   const [pokemon, setPokemon] = useState<Pokemon | null>(null);
   const [currentPokemonData, setCurrentPokemonData] = useState<Pokemon | null>(null);
   
-  // Navigation tab
-  const [activeTab, setActiveTab] = useState<'info' | 'tcg'>('info');
+  // Navigation tabs: Ficha Técnica, Combate y Versus, Cartas TCG
+  const [activeTab, setActiveTab] = useState<'info' | 'combat' | 'tcg'>('info');
 
   // Persistence & Quick access
   const [favorites, setFavorites] = useState<QuickPokemon[]>(() => {
@@ -384,6 +621,9 @@ function App() {
       if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
         setShowSuggestions(false);
       }
+      if (opponentContainerRef.current && !opponentContainerRef.current.contains(e.target as Node)) {
+        setShowOpponentSuggestions(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -438,11 +678,60 @@ function App() {
   // Cosmetic Forms (Vivillon motifs, Unown, Alcremie, Furfrou, etc.)
   const [pokemonForms, setPokemonForms] = useState<PokemonFormDetail[]>([]);
   const [selectedFormIndex, setSelectedFormIndex] = useState<number | null>(null);
+
+  // Versus / Comparison Mode
+  const [opponentQuery, setOpponentQuery] = useState('');
+  const [opponentPokemon, setOpponentPokemon] = useState<Pokemon | null>(null);
+  const [opponentLoading, setOpponentLoading] = useState(false);
+  const [opponentError, setOpponentError] = useState<string | null>(null);
+  const [showOpponentSuggestions, setShowOpponentSuggestions] = useState(false);
+  const opponentContainerRef = useRef<HTMLDivElement>(null);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   const [isShiny, setIsShiny] = useState(false);
+
+  // Opponent suggestions
+  const opponentSuggestions = opponentQuery.trim().length >= 1
+    ? allPokemonList
+        .filter(
+          (p) =>
+            p.name.toLowerCase().includes(opponentQuery.trim().toLowerCase()) ||
+            p.id.toString() === opponentQuery.trim() ||
+            p.id.toString().startsWith(opponentQuery.trim())
+        )
+        .slice(0, 5)
+    : [];
+
+  const searchOpponent = async (nameOrId: string) => {
+    const clean = nameOrId.trim().toLowerCase();
+    if (!clean) return;
+    setOpponentLoading(true);
+    setOpponentError(null);
+    setShowOpponentSuggestions(false);
+    try {
+      let data: Pokemon;
+      const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${clean}`);
+      if (res.ok) {
+        data = await res.json();
+      } else {
+        const fallback = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${clean}`);
+        if (!fallback.ok) throw new Error(`Pokémon "${clean}" no encontrado.`);
+        const spData = await fallback.json();
+        const defVariety = spData.varieties.find((v: any) => v.is_default) || spData.varieties[0];
+        const vRes = await fetch(defVariety.pokemon.url);
+        if (!vRes.ok) throw new Error('Error al cargar datos del rival.');
+        data = await vRes.json();
+      }
+      setOpponentPokemon(data);
+    } catch (err) {
+      setOpponentError(err instanceof Error ? err.message : 'No encontrado.');
+      setOpponentPokemon(null);
+    } finally {
+      setOpponentLoading(false);
+    }
+  };
 
   // Toggle favorite status
   const toggleFavorite = (poke: QuickPokemon) => {
@@ -671,6 +960,7 @@ function App() {
               console.error('Error fetching evolution chain:', evoErr);
             }
           }
+
           // Extract Pokédex description (prefer Spanish, fallback to English)
           const esEntry = speciesData.flavor_text_entries?.find((e: any) => e.language.name === 'es');
           const enEntry = speciesData.flavor_text_entries?.find((e: any) => e.language.name === 'en');
@@ -1048,6 +1338,18 @@ function App() {
     );
   };
 
+  // Base Stat Total calculation
+  const currentBst = currentPokemonData?.stats.reduce((acc, s) => acc + s.base_stat, 0) || 0;
+  const opponentBst = opponentPokemon?.stats.reduce((acc, s) => acc + s.base_stat, 0) || 0;
+
+  const getBstRating = (total: number) => {
+    if (total >= 670) return { label: '🌟 Legendario Supremo', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30' };
+    if (total >= 600) return { label: '⚔️ Nivel Élite / Pseudo-Legendario', color: 'text-purple-400 bg-purple-500/15 border-purple-500/30' };
+    if (total >= 500) return { label: '🛡️ Competitivo Avanzado', color: 'text-sky-400 bg-sky-500/15 border-sky-500/30' };
+    if (total >= 400) return { label: '✨ Nivel Intermedio', color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30' };
+    return { label: '🌱 Fase Básica', color: 'text-slate-400 bg-slate-500/15 border-slate-500/30' };
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-rose-500 selection:text-white flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
       {/* Background Gradient Orbs */}
@@ -1061,13 +1363,13 @@ function App() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 backdrop-blur-md mb-3">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
-            <span className="text-[10px] font-bold tracking-wider text-rose-400 uppercase">Buscador en Tiempo Real + TCG</span>
+            <span className="text-[10px] font-bold tracking-wider text-rose-400 uppercase">Pokédex + Combate Competitivo + TCG</span>
           </div>
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-white mb-2 bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400 bg-clip-text text-transparent">
             PokéSearch
           </h1>
           <p className="text-slate-400 text-sm">
-            Escribe el nombre o ID de un Pokémon para ver sus detalles, evoluciones, variantes y cartas TCG.
+            Escribe el nombre o ID de un Pokémon para ver sus detalles, análisis de combate, variantes y cartas TCG.
           </p>
         </div>
 
@@ -1091,7 +1393,7 @@ function App() {
                     setQuery(e.target.value);
                     setShowSuggestions(true);
                   }}
-                  placeholder="Escribe un Pokémon (ej: Zygarde, Urshifu, Charizard, Maushold)..."
+                  placeholder="Escribe un Pokémon (ej: Zygarde, Vivillon, Charizard, Blastoise)..."
                   className="w-full pl-11 pr-4 py-3 bg-slate-950/60 border border-slate-800 rounded-2xl text-white placeholder-slate-550 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all text-sm font-medium"
                 />
 
@@ -1255,12 +1557,12 @@ function App() {
 
             {!loading && !error && currentPokemonData && (
               <div className="space-y-6 animate-scale-up">
-                {/* Tab Switcher */}
-                <div className="flex border-b border-slate-800/80 gap-2">
+                {/* 3-Tab Switcher */}
+                <div className="flex border-b border-slate-800/80 gap-1 sm:gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveTab('info')}
-                    className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
                       activeTab === 'info'
                         ? 'border-rose-500 text-white'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -1270,8 +1572,19 @@ function App() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setActiveTab('combat')}
+                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                      activeTab === 'combat'
+                        ? 'border-rose-500 text-white'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>⚔️ Combate y Versus</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveTab('tcg')}
-                    className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
                       activeTab === 'tcg'
                         ? 'border-rose-500 text-white'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -1413,6 +1726,7 @@ function App() {
                         ))}
                       </div>
 
+                      {/* Main Sprite (Cosmetic Form Aware) */}
                       <img
                         src={
                           selectedFormIndex !== null && pokemonForms[selectedFormIndex]
@@ -1482,7 +1796,7 @@ function App() {
                               key={t.type.name}
                               className={`px-3 py-1 rounded-full text-xs font-bold capitalize border transition-all ${badgeColor.bg} ${badgeColor.text} ${badgeColor.border} ${badgeColor.glow}`}
                             >
-                              {t.type.name}
+                              {TYPE_TRANSLATIONS[t.type.name] || t.type.name}
                             </span>
                           );
                         })}
@@ -1607,7 +1921,366 @@ function App() {
                   </div>
                 )}
 
-                {/* Tab 2: TCG Cards */}
+                {/* Tab 2: Combate y Competitivo */}
+                {activeTab === 'combat' && (
+                  <div className="space-y-6">
+                    {/* Header: BST and Evaluation */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-slate-950/40 border border-slate-850 rounded-3xl">
+                      <div>
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold block">
+                          Total de Estadísticas Base (BST)
+                        </span>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-3xl font-black text-white">{currentBst}</span>
+                          <span className="text-xs text-slate-400 font-medium">puntos base</span>
+                        </div>
+                      </div>
+
+                      <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold ${getBstRating(currentBst).color}`}>
+                        {getBstRating(currentBst).label}
+                      </div>
+                    </div>
+
+                    {/* Radar Chart + Abilities Row */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                      {/* Hexagonal Radar Chart */}
+                      <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-3xl flex flex-col items-center justify-center">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                          Balance de Estadísticas
+                        </span>
+                        <StatRadarChart
+                          stats={currentPokemonData.stats}
+                          primaryColorHex={TYPE_HEX_COLORS[currentPokemonData.types[0]?.type.name] || '#f43f5e'}
+                        />
+                      </div>
+
+                      {/* Abilities & Physical Roles */}
+                      <div className="space-y-4">
+                        <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-3xl space-y-3">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Habilidades Oficiales
+                          </span>
+
+                          {currentPokemonData.abilities && currentPokemonData.abilities.length > 0 ? (
+                            <div className="space-y-2">
+                              {currentPokemonData.abilities.map((ab) => (
+                                <div
+                                  key={ab.ability.name}
+                                  className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
+                                    ab.is_hidden
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                                      : 'bg-slate-900/60 border-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <span className="capitalize font-bold text-sm">
+                                    {ab.ability.name.replace(/-/g, ' ')}
+                                  </span>
+                                  {ab.is_hidden ? (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                                      ⭐ Habilidad Oculta
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      Slot {ab.slot}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-500 italic">No hay habilidades registradas.</p>
+                          )}
+                        </div>
+
+                        {/* Quick Defensive Summary */}
+                        <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-3xl space-y-2">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Perfil Defensivo Elemental
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {currentPokemonData.types.map((t) => (
+                              <span
+                                key={t.type.name}
+                                className={`px-2.5 py-1 rounded-xl text-xs font-bold border capitalize ${TYPE_COLORS[t.type.name]?.bg} ${TYPE_COLORS[t.type.name]?.text} ${TYPE_COLORS[t.type.name]?.border}`}
+                              >
+                                {TYPE_TRANSLATIONS[t.type.name] || t.type.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Type Effectiveness (Matchups) Table */}
+                    {(() => {
+                      const defTypes = currentPokemonData.types.map((t) => t.type.name);
+                      const matchups = calculateTypeMatchups(defTypes);
+
+                      return (
+                        <div className="space-y-3 bg-slate-950/40 border border-slate-850 p-4 sm:p-5 rounded-3xl">
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-1 flex items-center gap-2">
+                              <span>🛡️ Efectividad de Tipos (Daño Recibido)</span>
+                            </h3>
+                            <p className="text-[11px] text-slate-400">
+                              Multiplicador de daño calculado según los tipos defensivos de {formatPokemonTitleName(currentPokemonData.name, pokemon!.species.name || pokemon!.name)}.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2.5 pt-1">
+                            {/* 4x Critical Weakness */}
+                            {matchups.quadWeak.length > 0 && (
+                              <div className="p-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <span className="text-xs font-black text-rose-400 min-w-[130px] flex items-center gap-1">
+                                  <span>🔴 Vulnerable (4×)</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matchups.quadWeak.map((type) => (
+                                    <span
+                                      key={type}
+                                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold border ${TYPE_COLORS[type]?.bg} ${TYPE_COLORS[type]?.text} ${TYPE_COLORS[type]?.border}`}
+                                    >
+                                      {TYPE_TRANSLATIONS[type]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 2x Weakness */}
+                            {matchups.doubleWeak.length > 0 && (
+                              <div className="p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <span className="text-xs font-black text-amber-400 min-w-[130px] flex items-center gap-1">
+                                  <span>🟠 Débil (2×)</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matchups.doubleWeak.map((type) => (
+                                    <span
+                                      key={type}
+                                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold border ${TYPE_COLORS[type]?.bg} ${TYPE_COLORS[type]?.text} ${TYPE_COLORS[type]?.border}`}
+                                    >
+                                      {TYPE_TRANSLATIONS[type]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 0.5x Resistance */}
+                            {matchups.halfResist.length > 0 && (
+                              <div className="p-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <span className="text-xs font-black text-emerald-400 min-w-[130px] flex items-center gap-1">
+                                  <span>🟢 Resistente (½×)</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matchups.halfResist.map((type) => (
+                                    <span
+                                      key={type}
+                                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold border ${TYPE_COLORS[type]?.bg} ${TYPE_COLORS[type]?.text} ${TYPE_COLORS[type]?.border}`}
+                                    >
+                                      {TYPE_TRANSLATIONS[type]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 0.25x Super Resistance */}
+                            {matchups.quadResist.length > 0 && (
+                              <div className="p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <span className="text-xs font-black text-cyan-400 min-w-[130px] flex items-center gap-1">
+                                  <span>🔵 Muy Resistente (¼×)</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matchups.quadResist.map((type) => (
+                                    <span
+                                      key={type}
+                                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold border ${TYPE_COLORS[type]?.bg} ${TYPE_COLORS[type]?.text} ${TYPE_COLORS[type]?.border}`}
+                                    >
+                                      {TYPE_TRANSLATIONS[type]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 0x Immunity */}
+                            {matchups.immune.length > 0 && (
+                              <div className="p-2.5 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <span className="text-xs font-black text-purple-400 min-w-[130px] flex items-center gap-1">
+                                  <span>⚫ Inmune (0×)</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matchups.immune.map((type) => (
+                                    <span
+                                      key={type}
+                                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold border ${TYPE_COLORS[type]?.bg} ${TYPE_COLORS[type]?.text} ${TYPE_COLORS[type]?.border}`}
+                                    >
+                                      {TYPE_TRANSLATIONS[type]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Versus / Side-by-Side Comparison Mode */}
+                    <div className="space-y-4 bg-slate-950/40 border border-slate-850 p-4 sm:p-5 rounded-3xl">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-0.5 flex items-center gap-2">
+                            <span>🆚 Modo Comparador (Cara a Cara)</span>
+                          </h3>
+                          <p className="text-[11px] text-slate-400">
+                            Compara las estadísticas base de {currentPokemonData.name} contra cualquier otro Pokémon rival.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Opponent Search Bar */}
+                      <div ref={opponentContainerRef} className="relative">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={opponentQuery}
+                            onFocus={() => setShowOpponentSuggestions(true)}
+                            onChange={(e) => {
+                              setOpponentQuery(e.target.value);
+                              setShowOpponentSuggestions(true);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                searchOpponent(opponentQuery);
+                              }
+                            }}
+                            placeholder="Elige un rival (ej: Blastoise, Gengar, Mewtwo, Lucario)..."
+                            className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => searchOpponent(opponentQuery)}
+                            disabled={opponentLoading || !opponentQuery.trim()}
+                            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-rose-300 font-bold text-xs rounded-2xl border border-slate-700 transition-all cursor-pointer"
+                          >
+                            {opponentLoading ? 'Cargando...' : 'Comparar'}
+                          </button>
+                        </div>
+
+                        {/* Opponent Suggestions Dropdown */}
+                        {showOpponentSuggestions && opponentSuggestions.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden py-1 divide-y divide-slate-800/40">
+                            {opponentSuggestions.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  setOpponentQuery(p.name);
+                                  searchOpponent(p.name);
+                                }}
+                                className="w-full px-4 py-2 flex items-center justify-between hover:bg-slate-800 text-slate-200 hover:text-white transition-colors cursor-pointer text-left"
+                              >
+                                <span className="capitalize text-xs font-semibold">{p.name}</span>
+                                <span className="text-[10px] font-mono text-slate-500">#{p.id}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {opponentError && (
+                        <p className="text-xs text-rose-400 italic text-center py-2">{opponentError}</p>
+                      )}
+
+                      {/* Side-by-Side Comparison UI */}
+                      {opponentPokemon && (
+                        <div className="space-y-4 pt-2 animate-scale-up">
+                          {/* Top Avatars Row */}
+                          <div className="grid grid-cols-2 gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                            {/* Player Pokemon */}
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={currentPokemonData.sprites.front_default}
+                                alt={currentPokemonData.name}
+                                className="w-12 h-12 object-contain"
+                              />
+                              <div>
+                                <h4 className="text-xs font-bold text-white capitalize">{currentPokemonData.name}</h4>
+                                <span className="text-[10px] font-mono text-slate-400">BST: {currentBst}</span>
+                              </div>
+                            </div>
+
+                            {/* Opponent Pokemon */}
+                            <div className="flex items-center justify-end gap-3 text-right">
+                              <div>
+                                <h4 className="text-xs font-bold text-white capitalize">{opponentPokemon.name}</h4>
+                                <span className="text-[10px] font-mono text-slate-400">BST: {opponentBst}</span>
+                              </div>
+                              <img
+                                src={opponentPokemon.sprites.front_default}
+                                alt={opponentPokemon.name}
+                                className="w-12 h-12 object-contain"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Stat by Stat Comparison Bars */}
+                          <div className="space-y-2.5">
+                            {currentPokemonData.stats.map((stat) => {
+                              const s1 = stat.base_stat;
+                              const oppStat = opponentPokemon.stats.find((s) => s.stat.name === stat.stat.name);
+                              const s2 = oppStat ? oppStat.base_stat : 0;
+                              const diff = s1 - s2;
+                              const label = STAT_LABELS[stat.stat.name] || stat.stat.name.toUpperCase();
+
+                              return (
+                                <div key={stat.stat.name} className="p-2.5 bg-slate-950/60 border border-slate-850 rounded-xl space-y-1.5">
+                                  <div className="flex justify-between items-center text-xs">
+                                    <span className={`font-black ${diff > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                                      {s1} {diff > 0 && <span className="text-[10px] font-normal text-emerald-400">(+{diff})</span>}
+                                    </span>
+
+                                    <span className="font-bold text-slate-400 uppercase text-[10px]">{label}</span>
+
+                                    <span className={`font-black ${diff < 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                                      {diff < 0 && <span className="text-[10px] font-normal text-rose-400">(+{Math.abs(diff)}) </span>}
+                                      {s2}
+                                    </span>
+                                  </div>
+
+                                  {/* Visual Comparison Progress Bars */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="h-1.5 bg-slate-900 rounded-full overflow-hidden flex justify-end">
+                                      <div
+                                        className={`h-full rounded-full transition-all duration-500 ${
+                                          diff > 0 ? 'bg-emerald-500' : 'bg-slate-600'
+                                        }`}
+                                        style={{ width: `${Math.min((s1 / 200) * 100, 100)}%` }}
+                                      />
+                                    </div>
+                                    <div className="h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full transition-all duration-500 ${
+                                          diff < 0 ? 'bg-rose-500' : 'bg-slate-600'
+                                        }`}
+                                        style={{ width: `${Math.min((s2 / 200) * 100, 100)}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 3: TCG Cards */}
                 {activeTab === 'tcg' && (
                   <div className="space-y-4">
                     {tcgLoading && (
@@ -1675,7 +2348,7 @@ function App() {
                   <p className="text-slate-500 text-xs max-w-xs mx-auto mt-1 leading-relaxed">
                     {searched
                       ? 'Introduce un nombre válido para ver los datos del Pokémon.'
-                      : 'Escribe el nombre de tu Pokémon favorito, presiona "Sorpréndeme" o selecciona un favorito.'}
+                      : 'Escribe el nombre de tu Pokémon favorito, presiona "Azar" o selecciona un favorito.'}
                   </p>
                 </div>
               </div>
