@@ -65,6 +65,10 @@ interface PokemonFormDetail {
 interface VarietyItem {
   name: string;
   url: string;
+  id?: number;
+  displayName?: string;
+  spriteDefault?: string;
+  spriteShiny?: string;
 }
 
 interface EvolutionNode {
@@ -439,6 +443,27 @@ const formatPokemonTitleName = (fullName: string, speciesName: string) => {
   if (suffix === 'fan') return `${titleSpecies} (Ventilador)`;
   if (suffix === 'mow') return `${titleSpecies} (Corte)`;
 
+  // Minior Meteor & Core Forms
+  if (cleanSpecies === 'minior') {
+    if (suffix.includes('meteor')) {
+      if (suffix.includes('red')) return `${titleSpecies} (Meteorito Rojo)`;
+      if (suffix.includes('orange')) return `${titleSpecies} (Meteorito Naranja)`;
+      if (suffix.includes('yellow')) return `${titleSpecies} (Meteorito Amarillo)`;
+      if (suffix.includes('green')) return `${titleSpecies} (Meteorito Verde)`;
+      if (suffix.includes('blue')) return `${titleSpecies} (Meteorito Azul)`;
+      if (suffix.includes('indigo')) return `${titleSpecies} (Meteorito Añil)`;
+      if (suffix.includes('violet')) return `${titleSpecies} (Meteorito Violeta)`;
+      return `${titleSpecies} (Forma Meteorito)`;
+    }
+    if (suffix === 'red') return `${titleSpecies} (Núcleo Rojo)`;
+    if (suffix === 'orange') return `${titleSpecies} (Núcleo Naranja)`;
+    if (suffix === 'yellow') return `${titleSpecies} (Núcleo Amarillo)`;
+    if (suffix === 'green') return `${titleSpecies} (Núcleo Verde)`;
+    if (suffix === 'blue') return `${titleSpecies} (Núcleo Azul)`;
+    if (suffix === 'indigo') return `${titleSpecies} (Núcleo Añil)`;
+    if (suffix === 'violet') return `${titleSpecies} (Núcleo Violeta)`;
+  }
+
   const suffixFormatted = suffix
     .split('-')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -546,6 +571,27 @@ const getFormButtonLabel = (name: string, baseName: string, isActive: boolean) =
   if (suffix === 'frost') return '❄️ Nevera';
   if (suffix === 'fan') return '🌪️ Ventilador';
   if (suffix === 'mow') return '🌱 Cortacésped';
+
+  // Minior Meteor & Core Forms
+  if (baseName.toLowerCase() === 'minior') {
+    if (suffix.includes('meteor')) {
+      if (suffix.includes('red')) return '☄️ Meteorito Rojo';
+      if (suffix.includes('orange')) return '☄️ Meteorito Naranja';
+      if (suffix.includes('yellow')) return '☄️ Meteorito Amarillo';
+      if (suffix.includes('green')) return '☄️ Meteorito Verde';
+      if (suffix.includes('blue')) return '☄️ Meteorito Azul';
+      if (suffix.includes('indigo')) return '☄️ Meteorito Añil';
+      if (suffix.includes('violet')) return '☄️ Meteorito Violeta';
+      return '☄️ Forma Meteorito';
+    }
+    if (suffix === 'red') return '🔴 Núcleo Rojo';
+    if (suffix === 'orange') return '🟠 Núcleo Naranja';
+    if (suffix === 'yellow') return '🟡 Núcleo Amarillo';
+    if (suffix === 'green') return '🟢 Núcleo Verde';
+    if (suffix === 'blue') return '🔵 Núcleo Azul';
+    if (suffix === 'indigo') return '🟣 Núcleo Añil';
+    if (suffix === 'violet') return '🟪 Núcleo Violeta';
+  }
 
   return `🔄 ${suffix.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}`;
 };
@@ -935,7 +981,7 @@ function App() {
               .filter((v: any) => !v.is_default && regionalSuffixes.some(s => v.pokemon.name.includes(s)))
               .map((v: any) => ({ name: v.pokemon.name, url: v.pokemon.url }));
 
-            // Alternate forms (Zygarde 10%, Urshifu Rapid Strike, Maushold 3, Giratina Origin, Deoxys forms, etc.)
+            // Alternate forms (Zygarde 10%, Urshifu Rapid Strike, Maushold 3, Giratina Origin, Deoxys forms, Minior, etc.)
             forms = speciesData.varieties
               .filter((v: any) => 
                 !v.is_default && 
@@ -944,7 +990,18 @@ function App() {
                 !v.pokemon.name.includes('-primal') && 
                 !regionalSuffixes.some(s => v.pokemon.name.includes(s))
               )
-              .map((v: any) => ({ name: v.pokemon.name, url: v.pokemon.url }));
+              .map((v: any) => {
+                const varId = parseInt(v.pokemon.url.split('/').filter(Boolean).pop() || '0', 10);
+                const displayName = getFormButtonLabel(v.pokemon.name, speciesData.name || data.species.name || data.name, false);
+                return {
+                  name: v.pokemon.name,
+                  url: v.pokemon.url,
+                  id: varId,
+                  displayName,
+                  spriteDefault: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${varId}.png`,
+                  spriteShiny: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/${varId}.png`,
+                };
+              });
           }
 
           // Fetch Evolution Chain
@@ -1709,8 +1766,8 @@ function App() {
                           </button>
                         ))}
 
-                        {/* Alternate Forms Toggle Buttons (Zygarde 10%, Urshifu Rapid, Maushold 3, Giratina Origin, etc.) */}
-                        {formVarieties.map((form, idx) => (
+                        {/* Alternate Forms Toggle Buttons - only shown if <= 2 forms to prevent header clutter */}
+                        {formVarieties.length <= 2 && formVarieties.map((form, idx) => (
                           <button
                             key={form.name}
                             type="button"
@@ -1836,6 +1893,71 @@ function App() {
                                 loading="lazy"
                               />
                               <span>{form.displayName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Multi-Form Varieties Selector Strip (Minior, Rotom, Deoxys, etc. when forms > 2) */}
+                    {formVarieties.length > 2 && (
+                      <div className="space-y-2 p-3.5 bg-slate-950/40 border border-slate-850 rounded-3xl animate-fade-in">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                            <span>🪐</span>
+                            <span>Formas y Variantes ({formVarieties.length + 1})</span>
+                          </span>
+                          <span className="text-[11px] font-bold text-sky-400">
+                            {activeFormIndex === null
+                              ? 'Forma Base / Meteorito'
+                              : formVarieties[activeFormIndex]?.displayName || ''}
+                          </span>
+                        </div>
+
+                        {/* Horizontal Scrollable Badges with Mini Sprites */}
+                        <div className="flex gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+                          {/* Base Form Badge */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activeFormIndex !== null) {
+                                handleFormToggle(activeFormIndex);
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
+                              activeFormIndex === null
+                                ? 'bg-sky-500/25 text-white border-sky-500/50 shadow-md shadow-sky-500/10 scale-105'
+                                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                            }`}
+                          >
+                            <img
+                              src={isShiny && pokemon!.sprites.front_shiny ? pokemon!.sprites.front_shiny : pokemon!.sprites.front_default}
+                              alt={pokemon!.species.name || pokemon!.name}
+                              className="w-7 h-7 object-contain drop-shadow-sm"
+                              loading="lazy"
+                            />
+                            <span>Forma Base</span>
+                          </button>
+
+                          {/* Each Alternate Form Badge */}
+                          {formVarieties.map((form, idx) => (
+                            <button
+                              key={form.name}
+                              type="button"
+                              onClick={() => handleFormToggle(idx)}
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
+                                activeFormIndex === idx
+                                  ? 'bg-sky-500/25 text-white border-sky-500/50 shadow-md shadow-sky-500/10 scale-105'
+                                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                              }`}
+                            >
+                              <img
+                                src={isShiny && form.spriteShiny ? form.spriteShiny : (form.spriteDefault || '')}
+                                alt={form.displayName || form.name}
+                                className="w-7 h-7 object-contain drop-shadow-sm"
+                                loading="lazy"
+                              />
+                              <span>{form.displayName || form.name}</span>
                             </button>
                           ))}
                         </div>
