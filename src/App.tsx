@@ -38,6 +38,18 @@ interface Pokemon {
     latest?: string;
     legacy?: string;
   };
+  forms?: {
+    name: string;
+    url: string;
+  }[];
+}
+
+interface PokemonFormDetail {
+  name: string;
+  form_name: string;
+  displayName: string;
+  spriteDefault: string;
+  spriteShiny?: string;
 }
 
 interface VarietyItem {
@@ -422,6 +434,10 @@ function App() {
   // Pokédex Description & Category
   const [description, setDescription] = useState<string>('');
   const [genus, setGenus] = useState<string>('');
+
+  // Cosmetic Forms (Vivillon motifs, Unown, Alcremie, Furfrou, etc.)
+  const [pokemonForms, setPokemonForms] = useState<PokemonFormDetail[]>([]);
+  const [selectedFormIndex, setSelectedFormIndex] = useState<number | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -538,6 +554,8 @@ function App() {
     setShowSuggestions(false);
     setDescription('');
     setGenus('');
+    setPokemonForms([]);
+    setSelectedFormIndex(null);
 
     try {
       let data: Pokemon;
@@ -652,6 +670,42 @@ function App() {
         console.error('Error fetching species data:', speciesErr);
       }
 
+      // Fetch cosmetic forms if data.forms > 1 (e.g. Vivillon motifs, Unown, Alcremie, Furfrou)
+      let loadedForms: PokemonFormDetail[] = [];
+      if (data.forms && data.forms.length > 1) {
+        try {
+          const formResponses = await Promise.all(
+            data.forms.map((f: any) => fetch(f.url).then((r) => (r.ok ? r.json() : null)))
+          );
+          loadedForms = formResponses
+            .filter(Boolean)
+            .map((f: any) => {
+              const esNameObj = f.form_names?.find((fn: any) => fn.language.name === 'es');
+              const enNameObj = f.form_names?.find((fn: any) => fn.language.name === 'en');
+              const rawName = f.form_name || f.name.replace(`${data.name}-`, '');
+              const formattedFallback = rawName
+                .split('-')
+                .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+              const displayName = esNameObj?.name || enNameObj?.name || formattedFallback;
+
+              return {
+                name: f.name,
+                form_name: f.form_name || rawName,
+                displayName,
+                spriteDefault: f.sprites?.front_default || data.sprites.front_default,
+                spriteShiny: f.sprites?.front_shiny || data.sprites.front_shiny,
+              };
+            });
+        } catch (formErr) {
+          console.error('Error fetching Pokemon forms:', formErr);
+        }
+      }
+      setPokemonForms(loadedForms);
+      if (loadedForms.length > 0) {
+        setSelectedFormIndex(0);
+      }
+
       setPokemon(data);
       setCurrentPokemonData(data);
       setMegaVarieties(megas);
@@ -670,6 +724,8 @@ function App() {
       setPrimalVarieties([]);
       setRegionalVarieties([]);
       setFormVarieties([]);
+      setPokemonForms([]);
+      setSelectedFormIndex(null);
       setEvolutionTree(null);
       setTcgCards([]);
       setDescription('');
@@ -1343,7 +1399,11 @@ function App() {
 
                       <img
                         src={
-                          isShiny
+                          selectedFormIndex !== null && pokemonForms[selectedFormIndex]
+                            ? (isShiny && pokemonForms[selectedFormIndex].spriteShiny
+                                ? pokemonForms[selectedFormIndex].spriteShiny
+                                : pokemonForms[selectedFormIndex].spriteDefault)
+                            : isShiny
                             ? (currentPokemonData.sprites.other['official-artwork'].front_shiny || currentPokemonData.sprites.front_shiny || currentPokemonData.sprites.other['official-artwork'].front_default || currentPokemonData.sprites.front_default)
                             : (currentPokemonData.sprites.other['official-artwork'].front_default || currentPokemonData.sprites.front_default)
                         }
@@ -1355,6 +1415,11 @@ function App() {
                       <div className="flex items-center justify-center gap-2 mt-4 px-4 text-center flex-wrap">
                         <h2 className="text-2xl font-extrabold text-white capitalize tracking-tight">
                           {formatPokemonTitleName(currentPokemonData.name, pokemon!.species.name || pokemon!.name)}
+                          {selectedFormIndex !== null && pokemonForms.length > 1 && pokemonForms[selectedFormIndex] && (
+                            <span className="text-rose-400 font-bold ml-2 text-lg sm:text-xl block sm:inline">
+                              ({pokemonForms[selectedFormIndex].displayName})
+                            </span>
+                          )}
                         </h2>
 
                         {/* Audio Cry Button */}
@@ -1407,6 +1472,45 @@ function App() {
                         })}
                       </div>
                     </div>
+
+                    {/* Cosmetic Forms / Motifs Strip (Vivillon, Unown, Alcremie, Furfrou, etc.) */}
+                    {pokemonForms.length > 1 && (
+                      <div className="space-y-2 p-3.5 bg-slate-950/40 border border-slate-850 rounded-3xl animate-fade-in">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                            <span>🦋</span>
+                            <span>Formas y Motivos ({pokemonForms.length})</span>
+                          </span>
+                          <span className="text-[11px] font-bold text-rose-400">
+                            {selectedFormIndex !== null && pokemonForms[selectedFormIndex] ? pokemonForms[selectedFormIndex].displayName : ''}
+                          </span>
+                        </div>
+
+                        {/* Horizontal Scrollable Motifs Badges with Mini Sprites */}
+                        <div className="flex gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+                          {pokemonForms.map((form, idx) => (
+                            <button
+                              key={form.name}
+                              type="button"
+                              onClick={() => setSelectedFormIndex(idx)}
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
+                                selectedFormIndex === idx
+                                  ? 'bg-rose-500/25 text-white border-rose-500/50 shadow-md shadow-rose-500/10 scale-105'
+                                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                              }`}
+                            >
+                              <img
+                                src={isShiny && form.spriteShiny ? form.spriteShiny : form.spriteDefault}
+                                alt={form.displayName}
+                                className="w-7 h-7 object-contain drop-shadow-sm"
+                                loading="lazy"
+                              />
+                              <span>{form.displayName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Pokédex Entry & Physical Attributes */}
                     {(description || genus) && (
