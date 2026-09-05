@@ -419,6 +419,10 @@ function App() {
   const [selectedCard, setSelectedCard] = useState<TcgCardDetail | null>(null);
   const [cardModalLoading, setCardModalLoading] = useState(false);
   
+  // Pokédex Description & Category
+  const [description, setDescription] = useState<string>('');
+  const [genus, setGenus] = useState<string>('');
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
@@ -532,6 +536,8 @@ function App() {
     setIsPlayingCry(false);
     setSelectedCard(null);
     setShowSuggestions(false);
+    setDescription('');
+    setGenus('');
 
     try {
       let data: Pokemon;
@@ -631,6 +637,16 @@ function App() {
               console.error('Error fetching evolution chain:', evoErr);
             }
           }
+          // Extract Pokédex description (prefer Spanish, fallback to English)
+          const esEntry = speciesData.flavor_text_entries?.find((e: any) => e.language.name === 'es');
+          const enEntry = speciesData.flavor_text_entries?.find((e: any) => e.language.name === 'en');
+          const flavorText = (esEntry?.flavor_text || enEntry?.flavor_text || '').replace(/[\n\f\r]/g, ' ');
+          setDescription(flavorText);
+
+          // Extract category / genus (prefer Spanish, fallback to English)
+          const esGenus = speciesData.genera?.find((g: any) => g.language.name === 'es');
+          const enGenus = speciesData.genera?.find((g: any) => g.language.name === 'en');
+          setGenus(esGenus?.genus || enGenus?.genus || '');
         }
       } catch (speciesErr) {
         console.error('Error fetching species data:', speciesErr);
@@ -656,6 +672,8 @@ function App() {
       setFormVarieties([]);
       setEvolutionTree(null);
       setTcgCards([]);
+      setDescription('');
+      setGenus('');
       setError(err instanceof Error ? err.message : 'Error desconocido.');
     } finally {
       setLoading(false);
@@ -1389,6 +1407,40 @@ function App() {
                         })}
                       </div>
                     </div>
+
+                    {/* Pokédex Entry & Physical Attributes */}
+                    {(description || genus) && (
+                      <div className="space-y-3">
+                        {description && (
+                          <div className="relative p-4 rounded-3xl bg-slate-950/40 border border-slate-850 text-center space-y-1.5 shadow-inner">
+                            {genus && (
+                              <span className="inline-block text-[11px] font-bold text-rose-400 tracking-wider uppercase">
+                                {genus}
+                              </span>
+                            )}
+                            <p className="text-xs sm:text-sm text-slate-300 italic leading-relaxed max-w-lg mx-auto font-normal">
+                              "{description}"
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Height, Weight & Category Badges */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          <div className="bg-slate-950/40 border border-slate-850 p-2.5 rounded-2xl text-center">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Altura</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-200">{(currentPokemonData.height / 10).toFixed(1)} m</span>
+                          </div>
+                          <div className="bg-slate-950/40 border border-slate-850 p-2.5 rounded-2xl text-center">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Peso</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-200">{(currentPokemonData.weight / 10).toFixed(1)} kg</span>
+                          </div>
+                          <div className="bg-slate-950/40 border border-slate-850 p-2.5 rounded-2xl text-center col-span-2 sm:col-span-1">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Categoría</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-200 truncate block">{genus || 'Pokémon'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Statistics Grid */}
                     <div>
