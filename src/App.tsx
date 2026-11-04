@@ -87,6 +87,17 @@ interface TcgCardBrief {
   price?: number;
 }
 
+interface TcgSetBrief {
+  id: string;
+  name: string;
+  symbol?: string;
+  logo?: string;
+  cardCount?: {
+    total?: number;
+    official?: number;
+  };
+}
+
 interface UserCollectionItem {
   id: string;
   name: string;
@@ -112,7 +123,9 @@ interface TcgAbility {
 
 interface TcgCardDetail {
   id: string;
+  localId?: string;
   name: string;
+  category?: string;
   image?: string;
   rarity?: string;
   illustrator?: string;
@@ -653,6 +666,17 @@ const getFormButtonLabel = (name: string, baseName: string, isActive: boolean) =
   return `🔄 ${suffix.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}`;
 };
 
+const getSetIconUrl = (set: TcgSetBrief): string | null => {
+  if (set.symbol) {
+    // TCGdex stores most symbols under /en/ instead of /univ/
+    return set.symbol.replace('/univ/', '/en/') + '.png';
+  }
+  if (set.logo) {
+    return `${set.logo}.png`;
+  }
+  return null;
+};
+
 function App() {
   const [query, setQuery] = useState('');
   const [pokemon, setPokemon] = useState<Pokemon | null>(null);
@@ -661,8 +685,17 @@ function App() {
   // Navigation tabs: Ficha Técnica, Combate y Versus, Cartas TCG
   const [activeTab, setActiveTab] = useState<'info' | 'combat' | 'tcg'>('info');
 
-  // Main View Mode: 'detail' (Ficha individual), 'grid' (Catálogo Pokédex) o 'album' (Mi Álbum TCG)
-  const [viewMode, setViewMode] = useState<'detail' | 'grid' | 'album'>('detail');
+  // Main View Mode: 'detail' (Ficha individual), 'grid' (Catálogo Pokédex), 'tcg_explorer' (Explorador TCG Global) o 'album' (Mi Álbum TCG)
+  const [viewMode, setViewMode] = useState<'detail' | 'grid' | 'tcg_explorer' | 'album'>('detail');
+
+  // Global TCG Explorer state
+  const [tcgExplorerQuery, setTcgExplorerQuery] = useState<string>('');
+  const [tcgExplorerCards, setTcgExplorerCards] = useState<TcgCardBrief[]>([]);
+  const [tcgExplorerLoading, setTcgExplorerLoading] = useState<boolean>(false);
+  const [tcgExplorerSets, setTcgExplorerSets] = useState<TcgSetBrief[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+  const [tcgExplorerSortBy, setTcgExplorerSortBy] = useState<'default' | 'price_desc' | 'price_asc' | 'name_asc'>('default');
+  const [tcgExplorerDisplayCount, setTcgExplorerDisplayCount] = useState<number>(36);
 
   // Album view filters & sort
   const [albumSearchQuery, setAlbumSearchQuery] = useState<string>('');
@@ -774,6 +807,42 @@ function App() {
       }
     };
     loadTypesMap();
+  }, []);
+
+  // Pre-load TCG Sets for Global TCG Explorer
+  useEffect(() => {
+    const loadTcgSets = async () => {
+      try {
+        const cached = localStorage.getItem('poke_tcg_sets_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setTcgExplorerSets(parsed);
+            return;
+          }
+        }
+        let res = await fetch('https://api.tcgdex.net/v2/es/sets');
+        let setsData: TcgSetBrief[] = [];
+        if (res.ok) {
+          setsData = await res.json();
+        }
+        if (!Array.isArray(setsData) || setsData.length === 0) {
+          const enRes = await fetch('https://api.tcgdex.net/v2/en/sets');
+          if (enRes.ok) {
+            setsData = await enRes.json();
+          }
+        }
+        if (Array.isArray(setsData)) {
+          setTcgExplorerSets(setsData);
+          try {
+            localStorage.setItem('poke_tcg_sets_cache', JSON.stringify(setsData));
+          } catch {}
+        }
+      } catch (err) {
+        console.error('Error loading TCG sets:', err);
+      }
+    };
+    loadTcgSets();
   }, []);
 
   // Handle clicking outside to close suggestions dropdown
@@ -1069,18 +1138,41 @@ function App() {
     setCardModalLoading(true);
     setSelectedCard(null);
     try {
+      let detail: any = null;
       let res = await fetch(`https://api.tcgdex.net/v2/es/cards/${card.id}`);
-      if (!res.ok) {
-        res = await fetch(`https://api.tcgdex.net/v2/en/cards/${card.id}`);
-      }
       if (res.ok) {
-        const detail: TcgCardDetail = await res.json();
+        detail = await res.json();
+      }
+
+      // If Spanish fetch failed or Spanish card has no image, check English card
+      if (!detail || !detail.image) {
+        try {
+          const enRes = await fetch(`https://api.tcgdex.net/v2/en/cards/${card.id}`);
+          if (enRes.ok) {
+            const enDetail = await enRes.json();
+            if (!detail) {
+              detail = enDetail;
+            } else if (enDetail.image) {
+              detail.image = enDetail.image;
+            }
+          }
+        } catch {}
+      }
+
+      if (detail) {
+        if (!detail.image && card.image) {
+          detail.image = card.image;
+        }
+        if (!detail.localId && card.localId) {
+          detail.localId = card.localId;
+        }
         setSelectedCard(detail);
       } else {
         setSelectedCard({
           id: card.id,
           name: card.name,
           image: card.image,
+          localId: card.localId,
         });
       }
     } catch (err) {
@@ -1089,6 +1181,7 @@ function App() {
         id: card.id,
         name: card.name,
         image: card.image,
+        localId: card.localId,
       });
     } finally {
       setCardModalLoading(false);
@@ -1184,6 +1277,195 @@ function App() {
 
     return list;
   }, [userCollection, albumSearchQuery, albumSortBy]);
+
+  // Execute Search in Global TCG Explorer
+  const executeTcgExplorerSearch = async (searchTerm?: string) => {
+    const q = (searchTerm !== undefined ? searchTerm : tcgExplorerQuery).trim();
+    if (!q) return;
+
+    setTcgExplorerLoading(true);
+    setSelectedSetId(null);
+    try {
+      let res = await fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(q)}`);
+      let list: any[] = [];
+      if (res.ok) {
+        list = await res.json();
+      }
+      if (!Array.isArray(list) || list.length === 0) {
+        const enRes = await fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(q)}`);
+        if (enRes.ok) {
+          list = await enRes.json();
+        }
+      }
+      if (Array.isArray(list)) {
+        const formattedCards: TcgCardBrief[] = list.map((c: any) => ({
+          id: c.id,
+          localId: c.localId || '?',
+          name: c.name || c.id,
+          image: c.image,
+        }));
+        setTcgExplorerCards(formattedCards);
+        setTcgExplorerDisplayCount(36);
+
+        // Fetch prices for top results in background
+        const sampleCards = formattedCards.slice(0, 30);
+        Promise.all(
+          sampleCards.map((c) =>
+            fetch(`https://api.tcgdex.net/v2/es/cards/${c.id}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+          )
+        ).then((details) => {
+          const detailMap = new Map<string, { rarity?: string; price?: number }>();
+          details.filter(Boolean).forEach((d: any) => {
+            const price =
+              d.pricing?.tcgplayer?.holofoil?.marketPrice ||
+              d.pricing?.tcgplayer?.normal?.marketPrice ||
+              d.pricing?.tcgplayer?.marketPrice ||
+              d.pricing?.cardmarket?.avg ||
+              0;
+            detailMap.set(d.id, { rarity: d.rarity, price });
+          });
+
+          setTcgExplorerCards((prev) =>
+            prev.map((c) => {
+              const meta = detailMap.get(c.id);
+              return meta ? { ...c, rarity: meta.rarity, price: meta.price } : c;
+            })
+          );
+        });
+      }
+    } catch (err) {
+      console.error('Error in TCG Explorer search:', err);
+    } finally {
+      setTcgExplorerLoading(false);
+    }
+  };
+
+  // Load an entire Expansion / Set in Global TCG Explorer
+  const loadTcgSetCards = async (setId: string) => {
+    setSelectedSetId(setId);
+    setTcgExplorerLoading(true);
+    setTcgExplorerCards([]);
+    try {
+      // 1. Fetch Spanish and English set details in parallel
+      const [esRes, enRes] = await Promise.all([
+        fetch(`https://api.tcgdex.net/v2/es/sets/${setId}`).catch(() => null),
+        fetch(`https://api.tcgdex.net/v2/en/sets/${setId}`).catch(() => null),
+      ]);
+
+      let setData: any = null;
+      if (esRes && esRes.ok) {
+        setData = await esRes.json();
+      }
+
+      let enData: any = null;
+      if (enRes && enRes.ok) {
+        enData = await enRes.json();
+      }
+
+      // If Spanish has no cards, fallback to English set data
+      if (!setData || !setData.cards || setData.cards.length === 0) {
+        setData = enData;
+      }
+
+      if (setData && Array.isArray(setData.cards) && setData.cards.length > 0) {
+        // Build map of English cards for fallback images or names
+        const enCardMap = new Map<string, any>();
+        if (enData && Array.isArray(enData.cards)) {
+          enData.cards.forEach((c: any) => {
+            if (c.id) enCardMap.set(c.id, c);
+            if (c.localId) enCardMap.set(c.localId, c);
+          });
+        }
+
+        const serieId = setData.serie?.id || enData?.serie?.id || 'swsh';
+
+        // Process all cards without discarding cards that lack an official scan
+        const processedCards: TcgCardBrief[] = setData.cards.map((c: any) => {
+          let img = c.image;
+
+          // 1. Check if English counterpart has an image
+          if (!img && enCardMap.has(c.id)) {
+            img = enCardMap.get(c.id)?.image;
+          }
+          if (!img && enCardMap.has(c.localId)) {
+            img = enCardMap.get(c.localId)?.image;
+          }
+
+          // 2. Check known sub-set asset path conventions (e.g. swsh9tg -> swsh9, swsh12.5gg -> swsh12.5, swsh4.5sv -> swsh4.5, cel25cc -> cel25)
+          if (!img && setId) {
+            const cleanSetId = setId
+              .replace(/tg$/, '')
+              .replace(/gg$/, '')
+              .replace(/sv$/, '')
+              .replace(/cc$/, '');
+            if (cleanSetId !== setId) {
+              img = `https://assets.tcgdex.net/en/${serieId}/${cleanSetId}/${c.localId}`;
+            }
+          }
+
+          return {
+            id: c.id,
+            localId: c.localId || '?',
+            name: c.name || enCardMap.get(c.id)?.name || c.id,
+            image: img,
+          };
+        });
+
+        setTcgExplorerCards(processedCards);
+        setTcgExplorerDisplayCount(36);
+
+        // Fetch prices for top results in background
+        const sampleCards = processedCards.slice(0, 30);
+        Promise.all(
+          sampleCards.map((c: any) =>
+            fetch(`https://api.tcgdex.net/v2/es/cards/${c.id}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+          )
+        ).then((details) => {
+          const detailMap = new Map<string, { rarity?: string; price?: number }>();
+          details.filter(Boolean).forEach((d: any) => {
+            const price =
+              d.pricing?.tcgplayer?.holofoil?.marketPrice ||
+              d.pricing?.tcgplayer?.normal?.marketPrice ||
+              d.pricing?.tcgplayer?.marketPrice ||
+              d.pricing?.cardmarket?.avg ||
+              0;
+            detailMap.set(d.id, { rarity: d.rarity, price });
+          });
+
+          setTcgExplorerCards((prev) =>
+            prev.map((c) => {
+              const meta = detailMap.get(c.id);
+              return meta ? { ...c, rarity: meta.rarity, price: meta.price } : c;
+            })
+          );
+        });
+      } else {
+        setTcgExplorerCards([]);
+      }
+    } catch (err) {
+      console.error('Error loading TCG Set:', err);
+      setTcgExplorerCards([]);
+    } finally {
+      setTcgExplorerLoading(false);
+    }
+  };
+
+  // Filtered and Sorted Cards for Global TCG Explorer
+  const sortedTcgExplorerCards = useMemo(() => {
+    let list = [...tcgExplorerCards];
+    if (tcgExplorerSortBy === 'price_desc') {
+      list.sort((a, b) => (b.price || 0) - (a.price || 0));
+    } else if (tcgExplorerSortBy === 'price_asc') {
+      list.sort((a, b) => (a.price || 0) - (b.price || 0));
+    } else if (tcgExplorerSortBy === 'name_asc') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
+  }, [tcgExplorerCards, tcgExplorerSortBy]);
 
   // Available unique rarities for current cards
   const availableRarities = useMemo(() => {
@@ -1798,6 +2080,23 @@ function App() {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setViewMode('tcg_explorer');
+                if (tcgExplorerCards.length === 0 && !tcgExplorerQuery) {
+                  executeTcgExplorerSearch('Pikachu');
+                }
+              }}
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'tcg_explorer'
+                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>🃏</span>
+              <span>Explorador TCG</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setViewMode('album')}
               className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'album'
@@ -2103,6 +2402,361 @@ function App() {
                 >
                   Cargar más Pokémon (+36)
                 </button>
+              </div>
+            )}
+          </div>
+        ) : viewMode === 'tcg_explorer' ? (
+          /* GLOBAL TCG EXPLORER VIEW ("BUSCADOR Y EXPLORADOR DE CARTAS") */
+          <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
+            {/* Explorer Header & Search Banner */}
+            <div className="bg-gradient-to-r from-rose-500/15 via-slate-900 to-amber-500/15 border border-rose-500/30 p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-2xl shadow-lg shadow-rose-500/10">
+                  🃏
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2">
+                    <span>Explorador Global de Cartas TCG</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold">
+                      TCGdex API
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Busca libremente cualquier carta (Pokémon, Entrenadores, Objetos, Energías) o navega por expansiones oficiales completas.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Popular Searches */}
+              <div className="flex flex-wrap items-center gap-1.5 justify-center md:justify-end">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mr-1">Populares:</span>
+                {['Charizard', 'Pikachu', 'Mewtwo', 'Gengar', 'Profesor', 'Ultra Ball', 'Iono'].map((quickTerm) => (
+                  <button
+                    key={quickTerm}
+                    type="button"
+                    onClick={() => {
+                      setTcgExplorerQuery(quickTerm);
+                      executeTcgExplorerSearch(quickTerm);
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 text-slate-300 border border-slate-700 font-medium transition-all cursor-pointer"
+                  >
+                    {quickTerm}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Global Search Input Bar */}
+            <div className="bg-slate-950/50 border border-slate-800/80 p-3 sm:p-4 rounded-2xl space-y-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeTcgExplorerSearch();
+                }}
+                className="flex flex-col sm:flex-row items-center gap-2.5"
+              >
+                <div className="relative flex-1 w-full">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    value={tcgExplorerQuery}
+                    onChange={(e) => setTcgExplorerQuery(e.target.value)}
+                    placeholder="Escribe el nombre de cualquier carta, entrenador u objeto (ej. Ultra Ball, Charizard, Miriam)..."
+                    className="w-full pl-10 pr-9 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
+                  />
+                  {tcgExplorerQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setTcgExplorerQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={tcgExplorerLoading || !tcgExplorerQuery.trim()}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <span>Buscar Cartas</span>
+                </button>
+              </form>
+
+              {/* Expansions / Sets Horizontal Carousel */}
+              {tcgExplorerSets.length > 0 && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>📦</span> Expansiones y Sets Oficiales ({tcgExplorerSets.length})
+                    </span>
+                    <span className="text-[11px] text-slate-500 italic">Desliza para ver más</span>
+                  </div>
+
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                    {tcgExplorerSets.map((set) => {
+                      const isSelected = selectedSetId === set.id;
+                      const iconUrl = getSetIconUrl(set);
+                      return (
+                        <button
+                          key={set.id}
+                          type="button"
+                          onClick={() => loadTcgSetCards(set.id)}
+                          className={`flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-xl border text-left transition-all cursor-pointer group ${
+                            isSelected
+                              ? 'bg-rose-500/20 border-rose-500/60 text-white shadow-md shadow-rose-500/10'
+                              : 'bg-slate-900/80 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700 text-slate-300'
+                          }`}
+                        >
+                          <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-950/70 border border-slate-800 p-0.5 relative overflow-hidden">
+                            {iconUrl ? (
+                              <>
+                                <img
+                                  src={iconUrl}
+                                  alt={set.name}
+                                  loading="lazy"
+                                  className="max-w-full max-h-full object-contain filter drop-shadow group-hover:scale-110 transition-transform"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    // If /en/ symbol failed, try original /univ/ symbol
+                                    if (set.symbol && target.src.includes('/en/')) {
+                                      target.src = set.symbol + '.png';
+                                    } else if (set.logo && !target.src.includes('logo')) {
+                                      target.src = `${set.logo}.png`;
+                                    } else {
+                                      target.style.display = 'none';
+                                      const fb = target.parentElement?.querySelector('.set-fallback-icon') as HTMLElement;
+                                      if (fb) fb.style.display = 'flex';
+                                    }
+                                  }}
+                                />
+                                <div className="set-fallback-icon hidden w-full h-full items-center justify-center">
+                                  <svg className="w-3.5 h-3.5 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                                    <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
+                                    <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
+                                    <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
+                                  </svg>
+                                </div>
+                              </>
+                            ) : (
+                              <svg className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                                <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
+                                <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
+                                <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
+                              </svg>
+                            )}
+                          </div>
+
+                          <div className="max-w-[130px] truncate">
+                            <p className="text-xs font-bold truncate leading-tight">{set.name}</p>
+                            {set.cardCount?.total && (
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                {set.cardCount.total} cartas
+                              </p>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Results Header with Count & Sort Controls */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between bg-slate-950/40 p-3 rounded-2xl border border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-300 font-medium">
+                  {selectedSetId
+                    ? `Set: ${tcgExplorerSets.find((s) => s.id === selectedSetId)?.name || selectedSetId}`
+                    : tcgExplorerQuery
+                    ? `Resultados para "${tcgExplorerQuery}"`
+                    : 'Cartas encontradas'}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold">
+                  {tcgExplorerCards.length}
+                </span>
+              </div>
+
+              {/* Sort By Dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Ordenar por:</span>
+                <select
+                  value={tcgExplorerSortBy}
+                  onChange={(e) => setTcgExplorerSortBy(e.target.value as any)}
+                  className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-rose-500 cursor-pointer"
+                >
+                  <option value="default">Por Defecto / Relevancia</option>
+                  <option value="price_desc">Mayor Precio ($)</option>
+                  <option value="price_asc">Menor Precio ($)</option>
+                  <option value="name_asc">Nombre (A-Z)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Loading Spinner */}
+            {tcgExplorerLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                <div className="w-10 h-10 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin"></div>
+                <p className="text-xs text-slate-400 font-medium animate-pulse">
+                  Buscando cartas y consultando precios de mercado...
+                </p>
+              </div>
+            ) : sortedTcgExplorerCards.length === 0 ? (
+              /* Empty State */
+              <div className="bg-slate-950/40 border border-dashed border-slate-800 rounded-2xl p-10 text-center space-y-3">
+                <div className="text-4xl">🃏</div>
+                <h4 className="text-sm font-bold text-slate-300">
+                  {selectedSetId
+                    ? 'No se encontraron cartas en este Set'
+                    : tcgExplorerQuery
+                    ? 'No se encontraron cartas'
+                    : 'Inicia una búsqueda o elige un Set'}
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  {selectedSetId
+                    ? `No hay cartas registradas para el set "${tcgExplorerSets.find((s) => s.id === selectedSetId)?.name || selectedSetId}". Prueba seleccionando otra expansión.`
+                    : tcgExplorerQuery
+                    ? `No encontramos cartas con "${tcgExplorerQuery}". Intenta con otro nombre en español o inglés.`
+                    : 'Escribe un término en el buscador o selecciona cualquiera de las expansiones oficiales de arriba.'}
+                </p>
+              </div>
+            ) : (
+              /* Cards Grid */
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+                  {sortedTcgExplorerCards.slice(0, tcgExplorerDisplayCount).map((card) => {
+                    const isInCollection = userCollection.some((c) => c.id === card.id);
+                    return (
+                      <div
+                        key={card.id}
+                        className="group relative bg-slate-950/60 rounded-2xl p-2 border border-slate-800/80 hover:border-rose-500/40 transition-all flex flex-col justify-between hover:shadow-xl hover:shadow-rose-500/5 hover:-translate-y-1"
+                      >
+                        {/* Card Image with Inspector Click */}
+                        <div
+                          onClick={() => handleCardClick(card)}
+                          className="relative aspect-[2.5/3.5] rounded-xl overflow-hidden cursor-pointer bg-gradient-to-b from-slate-800 to-slate-950 border border-slate-750 p-2.5 flex flex-col justify-between items-center text-center select-none"
+                        >
+                          {/* Fallback Graphic (visible if no image or while loading / failing) */}
+                          <div className="w-full flex items-center justify-between text-[10px] text-slate-400 font-bold">
+                            <span className="text-amber-400">✨ TCG</span>
+                            <span className="font-mono bg-slate-800/90 px-1 rounded text-[9px] text-slate-300">#{card.localId}</span>
+                          </div>
+
+                          <div className="flex flex-col items-center justify-center my-auto space-y-1.5 px-1">
+                            <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-lg shadow-inner">
+                              🃏
+                            </div>
+                            <p className="text-xs font-bold text-white line-clamp-2 leading-tight">
+                              {card.name}
+                            </p>
+                            <span className="text-[9px] text-slate-400 px-1.5 py-0.5 rounded bg-slate-800/70 border border-slate-700/50">
+                              Scan pendiente
+                            </span>
+                          </div>
+
+                          <div className="w-full text-[9px] text-rose-300 font-semibold bg-rose-500/10 py-0.5 rounded border border-rose-500/20">
+                            Ver datos
+                          </div>
+
+                          {/* Card Image Overlay if URL is present */}
+                          {card.image && (
+                            <img
+                              src={`${card.image}/low.webp`}
+                              alt={card.name}
+                              loading="lazy"
+                              className="absolute inset-0 w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300 z-10"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                if (!target.src.endsWith('.png')) {
+                                  target.src = `${card.image}/low.png`;
+                                } else {
+                                  target.style.display = 'none';
+                                }
+                              }}
+                            />
+                          )}
+
+                          {/* Hover Overlay Hint */}
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20 pointer-events-none">
+                            <span className="bg-rose-600/90 text-white text-[10px] font-bold px-2 py-1 rounded-lg backdrop-blur-sm shadow-md flex items-center gap-1">
+                              <span>✨</span> Inspeccionar
+                            </span>
+                          </div>
+
+                          {/* Price Tag Pill */}
+                          {card.price !== undefined && card.price > 0 && (
+                            <div className="absolute bottom-1.5 right-1.5 bg-slate-950/85 backdrop-blur-md border border-emerald-500/40 text-emerald-400 text-[10px] font-black px-1.5 py-0.5 rounded-md font-mono shadow-sm z-20">
+                              ${card.price.toFixed(2)}
+                            </div>
+                          )}
+
+                          {/* Set/Local ID Pill */}
+                          {card.image && (
+                            <div className="absolute top-1.5 left-1.5 bg-slate-950/80 backdrop-blur-sm text-slate-300 text-[9px] font-mono px-1.5 py-0.5 rounded border border-slate-800 z-20">
+                              #{card.localId}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Card Info & Quick Album Add */}
+                        <div className="pt-2 space-y-1.5 flex flex-col justify-between flex-1">
+                          <div>
+                            <p className="text-xs font-bold text-slate-200 truncate" title={card.name}>
+                              {card.name}
+                            </p>
+                            {card.rarity && (
+                              <p className="text-[10px] text-slate-400 truncate" title={card.rarity}>
+                                {card.rarity}
+                              </p>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleCardCollection(card);
+                            }}
+                            className={`w-full py-1.5 px-2 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer border ${
+                              isInCollection
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40'
+                                : 'bg-slate-900 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border-slate-800 hover:border-rose-500/40'
+                            }`}
+                          >
+                            <span>{isInCollection ? '✓' : '+'}</span>
+                            <span>{isInCollection ? 'En mi Álbum' : 'Coleccionar'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Load More Button */}
+                {tcgExplorerDisplayCount < sortedTcgExplorerCards.length && (
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setTcgExplorerDisplayCount((prev) => prev + 36)}
+                      className="px-6 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white text-xs font-bold rounded-2xl border border-slate-700 transition-all cursor-pointer shadow-lg active:scale-95"
+                    >
+                      Cargar más cartas (+36) ({sortedTcgExplorerCards.length - tcgExplorerDisplayCount} restantes)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3504,7 +4158,7 @@ function App() {
                     }}
                   >
                     <div
-                      className="w-full h-full rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950 transition-transform duration-100 ease-out relative"
+                      className="w-full h-full rounded-2xl overflow-hidden border border-slate-750 bg-slate-950 transition-transform duration-100 ease-out relative"
                       style={{
                         transform: cardTilt.active
                           ? `rotateX(${cardTilt.x}deg) rotateY(${cardTilt.y}deg) scale(1.04)`
@@ -3512,15 +4166,62 @@ function App() {
                         transformStyle: 'preserve-3d',
                       }}
                     >
-                      <img
-                        src={selectedCard.image ? `${selectedCard.image}/high.webp` : ''}
-                        alt={selectedCard.name}
-                        className="w-full h-full object-cover pointer-events-none"
-                      />
+                      {/* Virtual 3D Card Graphic Face (shown when scan image is not yet available) */}
+                      <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 p-4 flex flex-col justify-between text-left border-2 border-amber-500/25 rounded-2xl select-none">
+                        <div className="flex items-start justify-between border-b border-slate-800 pb-2">
+                          <div className="max-w-[70%]">
+                            <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider block truncate">
+                              {selectedCard.stage || selectedCard.category || 'Pokémon TCG'}
+                            </span>
+                            <h3 className="text-sm font-black text-white leading-tight truncate">
+                              {selectedCard.name}
+                            </h3>
+                          </div>
+                          {selectedCard.hp && (
+                            <span className="text-xs font-black text-rose-400 font-mono">
+                              {selectedCard.hp} PS
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="my-auto py-3 text-center space-y-2">
+                          <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-3xl shadow-inner">
+                            🃏
+                          </div>
+                          <p className="text-xs font-semibold text-slate-300 px-2 line-clamp-2">
+                            {selectedCard.set?.name || 'Expansión Oficial'}
+                          </p>
+                          <span className="inline-block text-[9px] px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60">
+                            Scan oficial en preparación
+                          </span>
+                        </div>
+
+                        <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-[10px] text-slate-400">
+                          <span className="font-mono">#{selectedCard.localId || '?'}</span>
+                          <span className="truncate max-w-[120px]">{selectedCard.rarity || 'Oficial'}</span>
+                        </div>
+                      </div>
+
+                      {/* Card High-Res Image (rendered on top if present) */}
+                      {selectedCard.image && (
+                        <img
+                          src={`${selectedCard.image}/high.webp`}
+                          alt={selectedCard.name}
+                          className="w-full h-full object-cover pointer-events-none absolute inset-0 z-10"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            if (!target.src.endsWith('.png')) {
+                              target.src = `${selectedCard.image}/high.png`;
+                            } else {
+                              target.style.display = 'none';
+                            }
+                          }}
+                        />
+                      )}
 
                       {/* Holographic Sheen Layer */}
                       <div
-                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl"
+                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl z-20"
                         style={{
                           opacity: cardTilt.active ? 0.7 : 0,
                           background: `radial-gradient(circle at ${cardTilt.glareX}% ${cardTilt.glareY}%, rgba(255,255,255,0.7) 0%, rgba(255,182,193,0.3) 25%, rgba(135,206,250,0.3) 50%, transparent 75%)`,
@@ -3530,7 +4231,7 @@ function App() {
 
                       {/* Specular Diagonal Reflection */}
                       <div
-                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl"
+                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl z-20"
                         style={{
                           opacity: cardTilt.active ? 0.45 : 0,
                           background: `linear-gradient(${115 + cardTilt.y * 2}deg, transparent 20%, rgba(255,255,255,0.5) 45%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0.5) 55%, transparent 80%)`,
