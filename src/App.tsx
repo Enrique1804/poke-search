@@ -87,6 +87,16 @@ interface TcgCardBrief {
   price?: number;
 }
 
+interface UserCollectionItem {
+  id: string;
+  name: string;
+  localId: string;
+  image?: string;
+  rarity?: string;
+  price?: number;
+  addedAt: number;
+}
+
 interface TcgAttack {
   cost?: string[];
   name: string;
@@ -651,8 +661,12 @@ function App() {
   // Navigation tabs: Ficha Técnica, Combate y Versus, Cartas TCG
   const [activeTab, setActiveTab] = useState<'info' | 'combat' | 'tcg'>('info');
 
-  // Main View Mode: 'detail' (Ficha individual) vs 'grid' (Catálogo Pokédex)
-  const [viewMode, setViewMode] = useState<'detail' | 'grid'>('detail');
+  // Main View Mode: 'detail' (Ficha individual), 'grid' (Catálogo Pokédex) o 'album' (Mi Álbum TCG)
+  const [viewMode, setViewMode] = useState<'detail' | 'grid' | 'album'>('detail');
+
+  // Album view filters & sort
+  const [albumSearchQuery, setAlbumSearchQuery] = useState<string>('');
+  const [albumSortBy, setAlbumSortBy] = useState<'date_desc' | 'price_desc' | 'price_asc' | 'name_asc'>('date_desc');
 
   // Grid Catalog Filters & Sort
   const [selectedGen, setSelectedGen] = useState<number | null>(null); // null = todas
@@ -820,6 +834,17 @@ function App() {
   const [tcgSortBy, setTcgSortBy] = useState<'default' | 'price_desc' | 'price_asc' | 'name_asc'>('default');
   const [tcgRarityFilter, setTcgRarityFilter] = useState<string>('all');
   const [tcgSearchQuery, setTcgSearchQuery] = useState<string>('');
+  const [tcgViewOnlyCollection, setTcgViewOnlyCollection] = useState<boolean>(false);
+
+  // User TCG Collection ("Mi Álbum")
+  const [userCollection, setUserCollection] = useState<UserCollectionItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('poke_tcg_collection');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // 3D Card Tilt state for Inspector Modal
   const [cardTilt, setCardTilt] = useState<{ x: number; y: number; glareX: number; glareY: number; active: boolean }>({
@@ -1080,6 +1105,12 @@ function App() {
       list = list.filter((c) => c.name.toLowerCase().includes(q) || c.localId.includes(q));
     }
 
+    // Filter by Collection ("En mi álbum")
+    if (tcgViewOnlyCollection) {
+      const collectionSet = new Set(userCollection.map((c) => c.id));
+      list = list.filter((c) => collectionSet.has(c.id));
+    }
+
     // Filter by Rarity
     if (tcgRarityFilter !== 'all') {
       list = list.filter((c) => c.rarity && c.rarity.toLowerCase().includes(tcgRarityFilter.toLowerCase()));
@@ -1095,7 +1126,64 @@ function App() {
     }
 
     return list;
-  }, [tcgCards, tcgSearchQuery, tcgRarityFilter, tcgSortBy]);
+  }, [tcgCards, tcgSearchQuery, tcgRarityFilter, tcgSortBy, tcgViewOnlyCollection, userCollection]);
+
+  // Toggle Card Collection item
+  const toggleCardCollection = (card: { id: string; name: string; localId: string; image?: string; rarity?: string; price?: number }) => {
+    setUserCollection((prev) => {
+      const exists = prev.some((c) => c.id === card.id);
+      let updated: UserCollectionItem[];
+      if (exists) {
+        updated = prev.filter((c) => c.id !== card.id);
+      } else {
+        updated = [
+          {
+            id: card.id,
+            name: card.name,
+            localId: card.localId,
+            image: card.image,
+            rarity: card.rarity,
+            price: card.price,
+            addedAt: Date.now(),
+          },
+          ...prev,
+        ];
+      }
+      try {
+        localStorage.setItem('poke_tcg_collection', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Error saving TCG collection:', err);
+      }
+      return updated;
+    });
+  };
+
+  // Total user collection value calculation
+  const totalCollectionValue = useMemo(() => {
+    return userCollection.reduce((acc, c) => acc + (c.price || 0), 0);
+  }, [userCollection]);
+
+  // Filtered and Sorted Global User Collection for 'album' ViewMode
+  const filteredUserCollection = useMemo(() => {
+    let list = [...userCollection];
+
+    if (albumSearchQuery.trim()) {
+      const q = albumSearchQuery.trim().toLowerCase();
+      list = list.filter((c) => c.name.toLowerCase().includes(q) || c.localId.includes(q) || (c.rarity && c.rarity.toLowerCase().includes(q)));
+    }
+
+    if (albumSortBy === 'price_desc') {
+      list.sort((a, b) => (b.price || 0) - (a.price || 0));
+    } else if (albumSortBy === 'price_asc') {
+      list.sort((a, b) => (a.price || 0) - (b.price || 0));
+    } else if (albumSortBy === 'name_asc') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      list.sort((a, b) => b.addedAt - a.addedAt);
+    }
+
+    return list;
+  }, [userCollection, albumSearchQuery, albumSortBy]);
 
   // Available unique rarities for current cards
   const availableRarities = useMemo(() => {
@@ -1662,7 +1750,7 @@ function App() {
       </div>
 
       <div className={`relative z-10 sm:mx-auto sm:w-full transition-all duration-300 ${
-        viewMode === 'grid' ? 'max-w-6xl' : 'max-w-2xl'
+        viewMode === 'detail' ? 'max-w-2xl' : 'max-w-6xl'
       }`}>
         {/* Header */}
         <div className="text-center mb-6">
@@ -1674,15 +1762,15 @@ function App() {
             PokéSearch
           </h1>
           <p className="text-slate-400 text-sm max-w-lg mx-auto">
-            Explora los 1025 Pokémon, consulta análisis de combate competitivo, formas alternativas y cartas oficiales TCG.
+            Explora los 1025 Pokémon, consulta análisis de combate competitivo, formas alternativas y colecciona cartas oficiales TCG.
           </p>
 
-          {/* View Mode Switcher: Ficha Detallada vs Catálogo Pokédex */}
-          <div className="inline-flex items-center p-1 mt-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg backdrop-blur-md gap-1">
+          {/* View Mode Switcher: Ficha Detallada vs Catálogo Pokédex vs Mi Álbum TCG */}
+          <div className="inline-flex flex-wrap justify-center items-center p-1 mt-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg backdrop-blur-md gap-1">
             <button
               type="button"
               onClick={() => setViewMode('detail')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'detail'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -1694,7 +1782,7 @@ function App() {
             <button
               type="button"
               onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'grid'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -1706,6 +1794,23 @@ function App() {
                 viewMode === 'grid' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
               }`}>
                 1025
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('album')}
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'album'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>💼</span>
+              <span>Mi Álbum TCG</span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold ${
+                viewMode === 'album' ? 'bg-black/20 text-slate-950' : 'bg-slate-800 text-amber-400'
+              }`}>
+                {userCollection.length}
               </span>
             </button>
           </div>
@@ -1998,6 +2103,173 @@ function App() {
                 >
                   Cargar más Pokémon (+36)
                 </button>
+              </div>
+            )}
+          </div>
+        ) : viewMode === 'album' ? (
+          /* GLOBAL TCG ALBUM VIEW ("MI ÁLBUM TCG") */
+          <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
+            {/* Album Header & Stats Banner */}
+            <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-emerald-500/15 border border-amber-500/30 p-5 rounded-2xl flex flex-col sm:flex-row gap-4 items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl shadow-lg shadow-amber-500/10">
+                  💼
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2">
+                    <span>Mi Álbum de Cartas TCG</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                      {userCollection.length} {userCollection.length === 1 ? 'carta' : 'cartas'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Tu carpeta personal de cartas coleccionadas guardadas en este navegador.
+                  </p>
+                </div>
+              </div>
+
+              {/* Total Portfolio Value */}
+              <div className="bg-slate-950/70 border border-slate-800 px-4 py-2.5 rounded-2xl text-center sm:text-right w-full sm:w-auto">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                  Valor Estimado de Colección
+                </span>
+                <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">
+                  ${totalCollectionValue.toFixed(2)} <span className="text-xs text-emerald-500">USD</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Album Controls: Search & Sort */}
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-slate-950/40 p-3 rounded-2xl border border-slate-850">
+              <div className="relative flex-1">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  value={albumSearchQuery}
+                  onChange={(e) => setAlbumSearchQuery(e.target.value)}
+                  placeholder="Buscar en tu álbum por nombre o rareza..."
+                  className="w-full pl-10 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
+                />
+                {albumSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setAlbumSearchQuery('')}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Sort Selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-semibold whitespace-nowrap">Ordenar por:</span>
+                <select
+                  value={albumSortBy}
+                  onChange={(e) => setAlbumSortBy(e.target.value as any)}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  <option value="date_desc">Añadidas recientemente</option>
+                  <option value="price_desc">Mayor valor ($$$)</option>
+                  <option value="price_asc">Menor valor</option>
+                  <option value="name_asc">Nombre (A → Z)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Empty Album State */}
+            {userCollection.length === 0 ? (
+              <div className="text-center py-16 space-y-4 bg-slate-950/30 border border-slate-850 rounded-3xl">
+                <div className="w-16 h-16 mx-auto bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center text-3xl">
+                  🃏
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-200">Tu álbum aún está vacío</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 leading-relaxed">
+                    Busca a tus Pokémon favoritos, ve a la pestaña <strong>Cartas TCG</strong> y toca el botón <strong>"Añadir al Álbum"</strong> para empezar a armar tu colección.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className="px-5 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-lg shadow-rose-500/20 active:scale-95 inline-flex items-center gap-2"
+                >
+                  <span>🗂️</span>
+                  <span>Explorar Catálogo Pokédex</span>
+                </button>
+              </div>
+            ) : filteredUserCollection.length === 0 ? (
+              <div className="text-center py-12 space-y-2 bg-slate-950/30 border border-slate-850 rounded-2xl">
+                <p className="text-xs text-slate-400">No hay cartas en tu álbum que coincidan con tu búsqueda.</p>
+                <button
+                  type="button"
+                  onClick={() => setAlbumSearchQuery('')}
+                  className="text-xs text-amber-400 hover:underline cursor-pointer font-bold"
+                >
+                  Limpiar búsqueda
+                </button>
+              </div>
+            ) : (
+              /* Album Cards Grid */
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {filteredUserCollection.map((card) => (
+                  <div
+                    key={card.id}
+                    onClick={() => handleCardClick(card)}
+                    className="group relative flex flex-col items-center bg-slate-950/60 border border-amber-500/30 hover:border-amber-400/80 rounded-2xl p-2.5 transition-all hover:scale-[1.03] hover:shadow-xl hover:shadow-amber-500/10 cursor-pointer text-left overflow-hidden ring-1 ring-amber-500/20"
+                  >
+                    {/* Remove from Album Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCardCollection(card);
+                      }}
+                      title="Quitar de mi álbum"
+                      className="absolute top-2 right-2 z-10 p-1.5 rounded-xl bg-amber-500 text-slate-950 border border-amber-400 shadow-md hover:bg-red-500 hover:text-white hover:border-red-400 transition-colors cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                    </button>
+
+                    {/* Card Image */}
+                    <div className="w-full aspect-[2.5/3.5] rounded-xl overflow-hidden bg-slate-900/60 mb-2 relative">
+                      <img
+                        src={`${card.image}/low.webp`}
+                        alt={card.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    </div>
+
+                    {/* Name & Price */}
+                    <div className="w-full flex items-center justify-between gap-1 mb-0.5">
+                      <p className="text-xs font-bold text-slate-200 truncate group-hover:text-amber-300 transition-colors">
+                        {card.name}
+                      </p>
+                      {card.price !== undefined && card.price > 0 && (
+                        <span className="text-[10px] font-extrabold text-emerald-400 font-mono">
+                          ${card.price.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* ID & Rarity */}
+                    <div className="w-full flex items-center justify-between text-[10px] text-slate-500">
+                      <span className="font-mono text-slate-400">#{card.localId}</span>
+                      {card.rarity && (
+                        <span className="truncate max-w-[85px] text-[9px] text-amber-400/80 font-semibold">
+                          {card.rarity}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -2992,56 +3264,86 @@ function App() {
 
                     {!tcgLoading && tcgCards.length > 0 && (
                       <div className="space-y-3">
-                        {/* TCG Controls: Search, Sort & Rarity Filter */}
-                        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between bg-slate-950/40 p-2.5 rounded-2xl border border-slate-850">
-                          {/* Inner search */}
-                          <div className="relative flex-1">
-                            <input
-                              type="text"
-                              value={tcgSearchQuery}
-                              onChange={(e) => setTcgSearchQuery(e.target.value)}
-                              placeholder="Filtrar cartas..."
-                              className="w-full pl-3 pr-8 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
-                            />
-                            {tcgSearchQuery && (
-                              <button
-                                type="button"
-                                onClick={() => setTcgSearchQuery('')}
-                                className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-300 text-xs font-bold"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
+                        {/* TCG Controls: Search, Sort, Collection Toggle & Rarity Filter */}
+                        <div className="space-y-2 bg-slate-950/40 p-2.5 rounded-2xl border border-slate-850">
+                          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
+                            {/* Inner search */}
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                value={tcgSearchQuery}
+                                onChange={(e) => setTcgSearchQuery(e.target.value)}
+                                placeholder="Filtrar cartas..."
+                                className="w-full pl-3 pr-8 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                              />
+                              {tcgSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTcgSearchQuery('')}
+                                  className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-300 text-xs font-bold"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
 
-                          <div className="flex items-center gap-2">
-                            {/* Rarity filter */}
-                            {availableRarities.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              {/* Rarity filter */}
+                              {availableRarities.length > 0 && (
+                                <select
+                                  value={tcgRarityFilter}
+                                  onChange={(e) => setTcgRarityFilter(e.target.value)}
+                                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                                >
+                                  <option value="all">Todas las rarezas</option>
+                                  {availableRarities.map((r) => (
+                                    <option key={r} value={r}>
+                                      {r}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+
+                              {/* Sort */}
                               <select
-                                value={tcgRarityFilter}
-                                onChange={(e) => setTcgRarityFilter(e.target.value)}
+                                value={tcgSortBy}
+                                onChange={(e) => setTcgSortBy(e.target.value as any)}
                                 className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
                               >
-                                <option value="all">Todas las rarezas</option>
-                                {availableRarities.map((r) => (
-                                  <option key={r} value={r}>
-                                    {r}
-                                  </option>
-                                ))}
+                                <option value="default">Orden por defecto</option>
+                                <option value="price_desc">Mayor valor ($$$)</option>
+                                <option value="price_asc">Menor valor</option>
+                                <option value="name_asc">Nombre (A-Z)</option>
                               </select>
-                            )}
+                            </div>
+                          </div>
 
-                            {/* Sort */}
-                            <select
-                              value={tcgSortBy}
-                              onChange={(e) => setTcgSortBy(e.target.value as any)}
-                              className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                          {/* Collection / Binder Quick Bar */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-850/80 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => setTcgViewOnlyCollection(!tcgViewOnlyCollection)}
+                              className={`flex items-center gap-1.5 px-3 py-1 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
+                                tcgViewOnlyCollection
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                              }`}
                             >
-                              <option value="default">Orden por defecto</option>
-                              <option value="price_desc">Mayor valor ($$$)</option>
-                              <option value="price_asc">Menor valor</option>
-                              <option value="name_asc">Nombre (A-Z)</option>
-                            </select>
+                              <span>💼</span>
+                              <span>Ver solo en mi álbum</span>
+                              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-amber-300 font-mono">
+                                {userCollection.length}
+                              </span>
+                            </button>
+
+                            {userCollection.length > 0 && (
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                                <span>Valor de tu colección:</span>
+                                <strong className="text-emerald-400 font-mono font-bold">
+                                  ${totalCollectionValue.toFixed(2)} USD
+                                </strong>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -3049,26 +3351,62 @@ function App() {
                         <div className="flex justify-between items-center text-xs text-slate-400 px-1">
                           <span>
                             Mostrando <strong className="text-white">{filteredTcgCards.length}</strong> de {tcgCards.length} cartas
+                            {tcgViewOnlyCollection && (
+                              <span className="text-amber-400 font-semibold ml-1.5">(en tu álbum)</span>
+                            )}
                           </span>
                           <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
-                            Toca una carta para inspeccionar ataques y efecto 3D ✨
+                            Toca una carta para inspeccionar ataques, efecto 3D y guardarla en tu álbum ✨
                           </span>
                         </div>
 
                         {/* Cards Grid */}
                         {filteredTcgCards.length === 0 ? (
-                          <div className="text-center py-8 bg-slate-950/30 border border-slate-850 rounded-2xl">
-                            <p className="text-xs text-slate-400">No hay cartas que coincidan con los filtros aplicados.</p>
+                          <div className="text-center py-8 bg-slate-950/30 border border-slate-850 rounded-2xl space-y-1">
+                            <p className="text-xs text-slate-400">
+                              {tcgViewOnlyCollection
+                                ? 'Aún no has añadido cartas de este Pokémon a tu álbum.'
+                                : 'No hay cartas que coincidan con los filtros aplicados.'}
+                            </p>
+                            {tcgViewOnlyCollection && (
+                              <p className="text-[11px] text-slate-500">
+                                Haz clic en cualquier carta e interactúa con el botón "Añadir a mi Álbum" para guardarla.
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin">
-                            {filteredTcgCards.map((card) => (
-                              <button
+                            {filteredTcgCards.map((card) => {
+                              const isInCollection = userCollection.some((c) => c.id === card.id);
+                              return (
+                              <div
                                 key={card.id}
-                                type="button"
+                                className={`group relative flex flex-col items-center bg-slate-950/40 border rounded-2xl p-2.5 transition-all hover:scale-[1.03] hover:shadow-lg cursor-pointer text-left overflow-hidden ${
+                                  isInCollection
+                                    ? 'border-amber-500/50 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/30'
+                                    : 'border-slate-850 hover:border-rose-500/40 hover:shadow-rose-500/10'
+                                }`}
                                 onClick={() => handleCardClick(card)}
-                                className="group relative flex flex-col items-center bg-slate-950/40 border border-slate-850 hover:border-rose-500/40 rounded-2xl p-2.5 transition-all hover:scale-[1.03] hover:shadow-lg hover:shadow-rose-500/10 cursor-pointer text-left overflow-hidden"
                               >
+                                {/* Quick Album Badge/Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleCardCollection(card);
+                                  }}
+                                  title={isInCollection ? 'Quitar de mi álbum' : 'Añadir a mi álbum'}
+                                  className={`absolute top-2 right-2 z-10 p-1.5 rounded-xl border backdrop-blur-md transition-all cursor-pointer ${
+                                    isInCollection
+                                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md scale-105'
+                                      : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-amber-400 opacity-0 group-hover:opacity-100'
+                                  }`}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill={isInCollection ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                  </svg>
+                                </button>
+
                                 <div className="w-full aspect-[2.5/3.5] rounded-xl overflow-hidden bg-slate-900/60 mb-2 relative">
                                   <img
                                     src={`${card.image}/low.webp`}
@@ -3095,8 +3433,8 @@ function App() {
                                     </span>
                                   )}
                                 </div>
-                              </button>
-                            ))}
+                              </div>
+                            )})}
                           </div>
                         )}
                       </div>
@@ -3221,14 +3559,49 @@ function App() {
                       )}
                     </div>
 
-                    <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 mt-0.5">
-                      <span>{selectedCard.name}</span>
-                      {selectedCard.stage && (
-                        <span className="text-xs font-bold text-slate-400 font-normal">
-                          ({selectedCard.stage})
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                        <span>{selectedCard.name}</span>
+                        {selectedCard.stage && (
+                          <span className="text-xs font-bold text-slate-400 font-normal">
+                            ({selectedCard.stage})
+                          </span>
+                        )}
+                      </h3>
+
+                      {/* Add to Album Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const price =
+                            selectedCard.pricing?.tcgplayer?.holofoil?.marketPrice ||
+                            selectedCard.pricing?.tcgplayer?.normal?.marketPrice ||
+                            selectedCard.pricing?.tcgplayer?.marketPrice ||
+                            selectedCard.pricing?.cardmarket?.avg ||
+                            0;
+                          toggleCardCollection({
+                            id: selectedCard.id,
+                            name: selectedCard.name,
+                            localId: selectedCard.id.split('-').pop() || '',
+                            image: selectedCard.image,
+                            rarity: selectedCard.rarity,
+                            price,
+                          });
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 flex-shrink-0 ${
+                          userCollection.some((c) => c.id === selectedCard.id)
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                            : 'bg-slate-800 hover:bg-slate-750 text-slate-200 border-slate-700 hover:border-slate-600'
+                        }`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill={userCollection.some((c) => c.id === selectedCard.id) ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                        </svg>
+                        <span>
+                          {userCollection.some((c) => c.id === selectedCard.id) ? 'En mi Álbum ✓' : 'Añadir al Álbum'}
                         </span>
-                      )}
-                    </h3>
+                      </button>
+                    </div>
 
                     {selectedCard.set && (
                       <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
