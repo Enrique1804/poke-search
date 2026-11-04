@@ -83,6 +83,21 @@ interface TcgCardBrief {
   localId: string;
   name: string;
   image?: string;
+  rarity?: string;
+  price?: number;
+}
+
+interface TcgAttack {
+  cost?: string[];
+  name: string;
+  effect?: string;
+  damage?: string | number;
+}
+
+interface TcgAbility {
+  type?: string;
+  name: string;
+  effect?: string;
 }
 
 interface TcgCardDetail {
@@ -91,6 +106,18 @@ interface TcgCardDetail {
   image?: string;
   rarity?: string;
   illustrator?: string;
+  hp?: number;
+  stage?: string;
+  types?: string[];
+  abilities?: TcgAbility[];
+  attacks?: TcgAttack[];
+  weaknesses?: { type: string; value: string }[];
+  resistances?: { type: string; value: string }[];
+  retreat?: number;
+  legal?: {
+    standard?: boolean;
+    expanded?: boolean;
+  };
   set?: {
     name: string;
     logo?: string;
@@ -785,11 +812,23 @@ function App() {
   const [isPlayingCry, setIsPlayingCry] = useState(false);
   const [evolutionTree, setEvolutionTree] = useState<EvolutionNode | null>(null);
 
-  // TCG Cards state
+  // TCG Cards state & filters
   const [tcgCards, setTcgCards] = useState<TcgCardBrief[]>([]);
   const [tcgLoading, setTcgLoading] = useState(false);
   const [selectedCard, setSelectedCard] = useState<TcgCardDetail | null>(null);
   const [cardModalLoading, setCardModalLoading] = useState(false);
+  const [tcgSortBy, setTcgSortBy] = useState<'default' | 'price_desc' | 'price_asc' | 'name_asc'>('default');
+  const [tcgRarityFilter, setTcgRarityFilter] = useState<string>('all');
+  const [tcgSearchQuery, setTcgSearchQuery] = useState<string>('');
+
+  // 3D Card Tilt state for Inspector Modal
+  const [cardTilt, setCardTilt] = useState<{ x: number; y: number; glareX: number; glareY: number; active: boolean }>({
+    x: 0,
+    y: 0,
+    glareX: 50,
+    glareY: 50,
+    active: false,
+  });
   
   // Pokédex Description & Category
   const [description, setDescription] = useState<string>('');
@@ -965,6 +1004,34 @@ function App() {
 
         const validCards = cardsData.filter((c) => c.image && pattern.test(c.name));
         setTcgCards(validCards);
+
+        // Fetch prices & rarities in background for top cards to allow instant sorting & filtering
+        const sampleCards = validCards.slice(0, 30);
+        Promise.all(
+          sampleCards.map((c) =>
+            fetch(`https://api.tcgdex.net/v2/es/cards/${c.id}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+          )
+        ).then((details) => {
+          const detailMap = new Map<string, { rarity?: string; price?: number }>();
+          details.filter(Boolean).forEach((d: any) => {
+            const price =
+              d.pricing?.tcgplayer?.holofoil?.marketPrice ||
+              d.pricing?.tcgplayer?.normal?.marketPrice ||
+              d.pricing?.tcgplayer?.marketPrice ||
+              d.pricing?.cardmarket?.avg ||
+              0;
+            detailMap.set(d.id, { rarity: d.rarity, price });
+          });
+
+          setTcgCards((prev) =>
+            prev.map((c) => {
+              const meta = detailMap.get(c.id);
+              return meta ? { ...c, rarity: meta.rarity, price: meta.price } : c;
+            })
+          );
+        });
       }
     } catch (err) {
       console.error('Error fetching TCG cards:', err);
@@ -1001,6 +1068,63 @@ function App() {
     } finally {
       setCardModalLoading(false);
     }
+  };
+
+  // Filtered and Sorted TCG Cards
+  const filteredTcgCards = useMemo(() => {
+    let list = [...tcgCards];
+
+    // Filter by name/search
+    if (tcgSearchQuery.trim()) {
+      const q = tcgSearchQuery.trim().toLowerCase();
+      list = list.filter((c) => c.name.toLowerCase().includes(q) || c.localId.includes(q));
+    }
+
+    // Filter by Rarity
+    if (tcgRarityFilter !== 'all') {
+      list = list.filter((c) => c.rarity && c.rarity.toLowerCase().includes(tcgRarityFilter.toLowerCase()));
+    }
+
+    // Sort
+    if (tcgSortBy === 'price_desc') {
+      list.sort((a, b) => (b.price || 0) - (a.price || 0));
+    } else if (tcgSortBy === 'price_asc') {
+      list.sort((a, b) => (a.price || 0) - (b.price || 0));
+    } else if (tcgSortBy === 'name_asc') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return list;
+  }, [tcgCards, tcgSearchQuery, tcgRarityFilter, tcgSortBy]);
+
+  // Available unique rarities for current cards
+  const availableRarities = useMemo(() => {
+    const set = new Set<string>();
+    tcgCards.forEach((c) => {
+      if (c.rarity) set.add(c.rarity);
+    });
+    return Array.from(set);
+  }, [tcgCards]);
+
+  // Card 3D tilt handlers
+  const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const width = rect.width;
+    const height = rect.height;
+
+    // Normalised from -1 to 1
+    const rotateY = ((x / width) - 0.5) * 24; // deg
+    const rotateX = -((y / height) - 0.5) * 24; // deg
+    const glareX = (x / width) * 100;
+    const glareY = (y / height) * 100;
+
+    setCardTilt({ x: rotateX, y: rotateY, glareX, glareY, active: true });
+  };
+
+  const handleCardMouseLeave = () => {
+    setCardTilt({ x: 0, y: 0, glareX: 50, glareY: 50, active: false });
   };
 
   const executeSearch = async (searchTerm: string) => {
@@ -2867,36 +2991,114 @@ function App() {
                     )}
 
                     {!tcgLoading && tcgCards.length > 0 && (
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center text-xs text-slate-400">
-                          <span>Mostrando {tcgCards.length} cartas encontradas</span>
-                          <span className="text-[10px] text-slate-500 font-medium">Haz clic en una carta para ver detalles y precios</span>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-1">
-                          {tcgCards.map((card) => (
-                            <button
-                              key={card.id}
-                              type="button"
-                              onClick={() => handleCardClick(card)}
-                              className="group relative flex flex-col items-center bg-slate-950/40 border border-slate-850 hover:border-rose-500/40 rounded-2xl p-2.5 transition-all hover:scale-[1.03] hover:shadow-lg hover:shadow-rose-500/10 cursor-pointer text-left"
+                      <div className="space-y-3">
+                        {/* TCG Controls: Search, Sort & Rarity Filter */}
+                        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between bg-slate-950/40 p-2.5 rounded-2xl border border-slate-850">
+                          {/* Inner search */}
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              value={tcgSearchQuery}
+                              onChange={(e) => setTcgSearchQuery(e.target.value)}
+                              placeholder="Filtrar cartas..."
+                              className="w-full pl-3 pr-8 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                            />
+                            {tcgSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setTcgSearchQuery('')}
+                                className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-300 text-xs font-bold"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* Rarity filter */}
+                            {availableRarities.length > 0 && (
+                              <select
+                                value={tcgRarityFilter}
+                                onChange={(e) => setTcgRarityFilter(e.target.value)}
+                                className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                              >
+                                <option value="all">Todas las rarezas</option>
+                                {availableRarities.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+
+                            {/* Sort */}
+                            <select
+                              value={tcgSortBy}
+                              onChange={(e) => setTcgSortBy(e.target.value as any)}
+                              className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
                             >
-                              <div className="w-full aspect-[2.5/3.5] rounded-xl overflow-hidden bg-slate-900/60 mb-2 relative">
-                                <img
-                                  src={`${card.image}/low.webp`}
-                                  alt={card.name}
-                                  loading="lazy"
-                                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                                />
-                              </div>
-                              <p className="text-xs font-bold text-slate-200 truncate w-full group-hover:text-rose-400 transition-colors">
-                                {card.name}
-                              </p>
-                              <span className="text-[10px] font-mono text-slate-500 w-full truncate">
-                                #{card.localId}
-                              </span>
-                            </button>
-                          ))}
+                              <option value="default">Orden por defecto</option>
+                              <option value="price_desc">Mayor valor ($$$)</option>
+                              <option value="price_asc">Menor valor</option>
+                              <option value="name_asc">Nombre (A-Z)</option>
+                            </select>
+                          </div>
                         </div>
+
+                        {/* Results info */}
+                        <div className="flex justify-between items-center text-xs text-slate-400 px-1">
+                          <span>
+                            Mostrando <strong className="text-white">{filteredTcgCards.length}</strong> de {tcgCards.length} cartas
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+                            Toca una carta para inspeccionar ataques y efecto 3D ✨
+                          </span>
+                        </div>
+
+                        {/* Cards Grid */}
+                        {filteredTcgCards.length === 0 ? (
+                          <div className="text-center py-8 bg-slate-950/30 border border-slate-850 rounded-2xl">
+                            <p className="text-xs text-slate-400">No hay cartas que coincidan con los filtros aplicados.</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin">
+                            {filteredTcgCards.map((card) => (
+                              <button
+                                key={card.id}
+                                type="button"
+                                onClick={() => handleCardClick(card)}
+                                className="group relative flex flex-col items-center bg-slate-950/40 border border-slate-850 hover:border-rose-500/40 rounded-2xl p-2.5 transition-all hover:scale-[1.03] hover:shadow-lg hover:shadow-rose-500/10 cursor-pointer text-left overflow-hidden"
+                              >
+                                <div className="w-full aspect-[2.5/3.5] rounded-xl overflow-hidden bg-slate-900/60 mb-2 relative">
+                                  <img
+                                    src={`${card.image}/low.webp`}
+                                    alt={card.name}
+                                    loading="lazy"
+                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                  />
+                                </div>
+                                <div className="w-full flex items-center justify-between gap-1 mb-0.5">
+                                  <p className="text-xs font-bold text-slate-200 truncate group-hover:text-rose-400 transition-colors">
+                                    {card.name}
+                                  </p>
+                                  {card.price !== undefined && card.price > 0 && (
+                                    <span className="text-[10px] font-extrabold text-emerald-400 font-mono">
+                                      ${card.price.toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="w-full flex items-center justify-between text-[10px] text-slate-500">
+                                  <span className="font-mono">#{card.localId}</span>
+                                  {card.rarity && (
+                                    <span className="truncate max-w-[90px] text-[9px] text-slate-400">
+                                      {card.rarity}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2931,13 +3133,13 @@ function App() {
 
       {/* Card Inspector Modal */}
       {(selectedCard || cardModalLoading) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-2xl overflow-hidden my-auto">
             {/* Close button */}
             <button
               type="button"
               onClick={() => { setSelectedCard(null); setCardModalLoading(false); }}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 rounded-full transition-colors cursor-pointer z-10"
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-750 rounded-full transition-colors cursor-pointer z-20"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2945,32 +3147,89 @@ function App() {
             </button>
 
             {cardModalLoading && (
-              <div className="py-16 flex flex-col items-center justify-center space-y-3">
+              <div className="py-20 flex flex-col items-center justify-center space-y-3">
                 <div className="w-10 h-10 border-4 border-slate-800 border-t-rose-500 rounded-full animate-spin" />
                 <p className="text-xs text-slate-400 font-semibold">Cargando detalles de la carta...</p>
               </div>
             )}
 
             {!cardModalLoading && selectedCard && (
-              <div className="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
-                {/* High-res card image */}
-                <div className="w-48 sm:w-52 flex-shrink-0 aspect-[2.5/3.5] rounded-2xl overflow-hidden shadow-2xl shadow-rose-500/10 border border-slate-800 bg-slate-950">
-                  <img
-                    src={selectedCard.image ? `${selectedCard.image}/high.webp` : ''}
-                    alt={selectedCard.name}
-                    className="w-full h-full object-cover transition-transform hover:scale-105 duration-300"
-                  />
+              <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
+                {/* 3D Tilt Card Image with Holographic Glare */}
+                <div className="flex flex-col items-center gap-2">
+                  <div
+                    onMouseMove={handleCardMouseMove}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="w-56 sm:w-64 flex-shrink-0 aspect-[2.5/3.5] rounded-2xl relative shadow-2xl shadow-rose-500/10 cursor-grab active:cursor-grabbing select-none"
+                    style={{
+                      perspective: '1000px',
+                    }}
+                  >
+                    <div
+                      className="w-full h-full rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950 transition-transform duration-100 ease-out relative"
+                      style={{
+                        transform: cardTilt.active
+                          ? `rotateX(${cardTilt.x}deg) rotateY(${cardTilt.y}deg) scale(1.04)`
+                          : 'rotateX(0deg) rotateY(0deg) scale(1)',
+                        transformStyle: 'preserve-3d',
+                      }}
+                    >
+                      <img
+                        src={selectedCard.image ? `${selectedCard.image}/high.webp` : ''}
+                        alt={selectedCard.name}
+                        className="w-full h-full object-cover pointer-events-none"
+                      />
+
+                      {/* Holographic Sheen Layer */}
+                      <div
+                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl"
+                        style={{
+                          opacity: cardTilt.active ? 0.7 : 0,
+                          background: `radial-gradient(circle at ${cardTilt.glareX}% ${cardTilt.glareY}%, rgba(255,255,255,0.7) 0%, rgba(255,182,193,0.3) 25%, rgba(135,206,250,0.3) 50%, transparent 75%)`,
+                          mixBlendMode: 'color-dodge',
+                        }}
+                      />
+
+                      {/* Specular Diagonal Reflection */}
+                      <div
+                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 rounded-2xl"
+                        style={{
+                          opacity: cardTilt.active ? 0.45 : 0,
+                          background: `linear-gradient(${115 + cardTilt.y * 2}deg, transparent 20%, rgba(255,255,255,0.5) 45%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0.5) 55%, transparent 80%)`,
+                          mixBlendMode: 'overlay',
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium">
+                    <span>✨</span> Pasa el cursor para ver el efecto holográfico 3D
+                  </span>
                 </div>
 
-                {/* Details column */}
-                <div className="flex-1 w-full space-y-3 text-left">
+                {/* Details Column */}
+                <div className="flex-1 w-full space-y-3.5 text-left max-h-[70vh] overflow-y-auto pr-1 scrollbar-thin">
+                  {/* Header: Title, HP, Stage, Rarity */}
                   <div>
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 font-bold">
-                      {selectedCard.rarity || 'Carta Pokémon TCG'}
-                    </span>
-                    <h3 className="text-xl font-extrabold text-white tracking-tight">
-                      {selectedCard.name}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 font-bold">
+                        {selectedCard.rarity || 'Carta Pokémon TCG'}
+                      </span>
+                      {selectedCard.hp && (
+                        <span className="text-xs font-black font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          {selectedCard.hp} PS / HP
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 mt-0.5">
+                      <span>{selectedCard.name}</span>
+                      {selectedCard.stage && (
+                        <span className="text-xs font-bold text-slate-400 font-normal">
+                          ({selectedCard.stage})
+                        </span>
+                      )}
                     </h3>
+
                     {selectedCard.set && (
                       <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
                         <span>Expansión:</span>
@@ -2986,12 +3245,142 @@ function App() {
                     </div>
                   )}
 
+                  {/* Abilities Section */}
+                  {selectedCard.abilities && selectedCard.abilities.length > 0 && (
+                    <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                      <h4 className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>⭐</span> Habilidades ({selectedCard.abilities[0]?.type || 'Habilidad'})
+                      </h4>
+                      <div className="space-y-2">
+                        {selectedCard.abilities.map((ab, i) => (
+                          <div
+                            key={i}
+                            className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 space-y-1 text-left"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-amber-300">
+                                {ab.name || 'Habilidad'}
+                              </span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 uppercase">
+                                {ab.type || 'Habilidad'}
+                              </span>
+                            </div>
+                            {ab.effect && (
+                              <p className="text-[11px] text-slate-300 leading-snug">
+                                {ab.effect}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Attacks Section */}
+                  {selectedCard.attacks && selectedCard.attacks.length > 0 && (
+                    <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                      <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>⚔️</span> Ataques
+                      </h4>
+                      <div className="space-y-2">
+                        {selectedCard.attacks.map((atk, i) => (
+                          <div
+                            key={i}
+                            className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {atk.cost && atk.cost.map((c, ci) => (
+                                  <span
+                                    key={ci}
+                                    className="px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-slate-800 text-slate-300 border border-slate-700"
+                                    title={c}
+                                  >
+                                    {c}
+                                  </span>
+                                ))}
+                                <strong className="text-xs font-bold text-white">{atk.name}</strong>
+                              </div>
+                              {atk.damage && (
+                                <span className="text-xs font-black font-mono text-rose-400">
+                                  {atk.damage}
+                                </span>
+                              )}
+                            </div>
+                            {atk.effect && (
+                              <p className="text-[11px] text-slate-400 leading-snug">
+                                {atk.effect}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Weaknesses, Resistances, Retreat & Format Legality */}
+                  <div className={`grid gap-2 pt-1 border-t border-slate-800/80 ${
+                    selectedCard.resistances && selectedCard.resistances.length > 0
+                      ? 'grid-cols-3'
+                      : 'grid-cols-2'
+                  }`}>
+                    <div className="bg-slate-950/40 border border-slate-850 p-2 rounded-xl text-center">
+                      <span className="text-[10px] text-slate-500 font-bold block">Debilidad</span>
+                      <span className="text-xs font-semibold text-rose-300">
+                        {selectedCard.weaknesses && selectedCard.weaknesses.length > 0
+                          ? selectedCard.weaknesses.map((w) => `${w.type} ${w.value}`).join(', ')
+                          : 'Ninguna'}
+                      </span>
+                    </div>
+
+                    {selectedCard.resistances && selectedCard.resistances.length > 0 && (
+                      <div className="bg-slate-950/40 border border-slate-850 p-2 rounded-xl text-center">
+                        <span className="text-[10px] text-slate-500 font-bold block">Resistencia</span>
+                        <span className="text-xs font-semibold text-emerald-300">
+                          {selectedCard.resistances.map((r) => `${r.type} ${r.value}`).join(', ')}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="bg-slate-950/40 border border-slate-850 p-2 rounded-xl text-center">
+                      <span className="text-[10px] text-slate-500 font-bold block">Coste de Retirada</span>
+                      <span className="text-xs font-semibold text-slate-300">
+                        {selectedCard.retreat !== undefined ? `${selectedCard.retreat} Energía(s)` : 'Gratis'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Format Legality Badges */}
+                  {selectedCard.legal && (
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <span className="text-[10px] text-slate-500 font-bold">Legalidad:</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                          selectedCard.legal.standard
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-500 border-slate-700'
+                        }`}
+                      >
+                        Estándar {selectedCard.legal.standard ? '✓' : '✗'}
+                      </span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                          selectedCard.legal.expanded
+                            ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                            : 'bg-slate-800 text-slate-500 border-slate-700'
+                        }`}
+                      >
+                        Expandido {selectedCard.legal.expanded ? '✓' : '✗'}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Pricing Section */}
-                  <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                  <div className="pt-2 border-t border-slate-800/80 space-y-2">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                       Precios de Mercado
                     </h4>
-                    
+
                     <div className="grid grid-cols-2 gap-2">
                       {/* TCGPlayer */}
                       <div className="bg-slate-950/50 border border-slate-800 p-2.5 rounded-xl">
