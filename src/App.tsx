@@ -1532,11 +1532,33 @@ function App() {
             <span className="text-[10px] font-bold tracking-wider text-rose-400 uppercase">Pokédex + Combate Competitivo + TCG</span>
           </div>
           <div className="flex items-center justify-center gap-2.5 sm:gap-3 mb-1.5 sm:mb-2">
-            <img
-              src={`${import.meta.env.BASE_URL}favicon.svg`}
-              alt="PokéSearch Logo"
-              className="w-9 h-9 sm:w-11 sm:h-11 drop-shadow-[0_0_12px_rgba(244,63,94,0.4)] select-none"
-            />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 128 128"
+              aria-label="PokéSearch Logo"
+              className="w-9 h-9 sm:w-11 sm:h-11 drop-shadow-[0_0_12px_rgba(244,63,94,0.45)] select-none flex-shrink-0"
+            >
+              <defs>
+                <linearGradient id="logoTopRed" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#fb7185" />
+                  <stop offset="55%" stopColor="#e11d48" />
+                  <stop offset="100%" stopColor="#9f1239" />
+                </linearGradient>
+                <linearGradient id="logoBottomWhite" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="100%" stopColor="#cbd5e1" />
+                </linearGradient>
+              </defs>
+              <circle cx="64" cy="64" r="58" fill="#0f172a" />
+              <path d="M 10 64 A 54 54 0 0 1 118 64 Z" fill="url(#logoTopRed)" />
+              <path d="M 10 64 A 54 54 0 0 0 118 64 Z" fill="url(#logoBottomWhite)" />
+              <ellipse cx="44" cy="34" rx="18" ry="8" transform="rotate(-25 44 34)" fill="#ffffff" opacity="0.28" />
+              <rect x="8" y="57" width="112" height="14" fill="#0f172a" />
+              <circle cx="64" cy="64" r="55" fill="none" stroke="#0f172a" strokeWidth="6" />
+              <circle cx="64" cy="64" r="19" fill="#0f172a" />
+              <circle cx="64" cy="64" r="13" fill="#f8fafc" />
+              <circle cx="64" cy="64" r="7" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1.5" />
+            </svg>
             <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400 bg-clip-text text-transparent">
               PokéSearch
             </h1>
