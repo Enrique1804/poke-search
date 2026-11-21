@@ -1033,19 +1033,22 @@ function App() {
               .filter((v: any) => !v.is_default && v.pokemon.name.includes('-primal'))
               .map((v: any) => ({ name: v.pokemon.name, url: v.pokemon.url }));
 
-            // Regional forms
+            // Regional forms (exclude Pikachu cap forms like pikachu-alola-cap)
+            const isRegionalVariety = (name: string) =>
+              !name.includes('-cap') && regionalSuffixes.some((s) => name.includes(s));
+
             regionals = speciesData.varieties
-              .filter((v: any) => !v.is_default && regionalSuffixes.some(s => v.pokemon.name.includes(s)))
+              .filter((v: any) => !v.is_default && isRegionalVariety(v.pokemon.name))
               .map((v: any) => ({ name: v.pokemon.name, url: v.pokemon.url }));
 
-            // Alternate forms (Zygarde 10%, Urshifu Rapid Strike, Maushold 3, Giratina Origin, Deoxys forms, Minior, etc.)
+            // Alternate forms (Zygarde 10%, Urshifu Rapid Strike, Maushold 3, Giratina Origin, Deoxys forms, Minior, Pikachu Caps, etc.)
             forms = speciesData.varieties
               .filter((v: any) => 
                 !v.is_default && 
                 !v.pokemon.name.includes('-mega') && 
                 !v.pokemon.name.includes('-gmax') && 
                 !v.pokemon.name.includes('-primal') && 
-                !regionalSuffixes.some(s => v.pokemon.name.includes(s))
+                !isRegionalVariety(v.pokemon.name)
               )
               .map((v: any) => {
                 const varId = parseInt(v.pokemon.url.split('/').filter(Boolean).pop() || '0', 10);
