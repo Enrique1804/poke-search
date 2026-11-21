@@ -33,39 +33,39 @@ export const TcgAlbumView = ({
   onExploreGrid,
 }: TcgAlbumViewProps) => {
   return (
-    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
+    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-3 sm:p-6 shadow-2xl space-y-3.5 sm:space-y-6 animate-scale-up">
       {/* Album Header & Stats Banner */}
-      <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-emerald-500/15 border border-amber-500/30 p-5 rounded-2xl flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl shadow-lg shadow-amber-500/10">
+      <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-emerald-500/15 border border-amber-500/30 p-3 sm:p-5 rounded-2xl flex flex-col sm:flex-row gap-2.5 sm:gap-4 items-stretch sm:items-center justify-between">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-lg sm:text-2xl shadow-lg shadow-amber-500/10 shrink-0">
             💼
           </div>
-          <div>
-            <h3 className="text-lg font-black text-white flex items-center gap-2">
-              <span>Mi Álbum de Cartas TCG</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm sm:text-lg font-black text-white flex items-center justify-between sm:justify-start gap-2">
+              <span className="truncate">Mi Álbum TCG</span>
+              <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono whitespace-nowrap shrink-0">
                 {userCollection.length} {userCollection.length === 1 ? 'carta' : 'cartas'}
               </span>
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="hidden sm:block text-xs text-slate-400">
               Tu carpeta personal de cartas coleccionadas guardadas en este navegador.
             </p>
           </div>
         </div>
 
         {/* Total Portfolio Value */}
-        <div className="bg-slate-950/70 border border-slate-800 px-4 py-2.5 rounded-2xl text-center sm:text-right w-full sm:w-auto">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-            Valor Estimado de Colección
+        <div className="bg-slate-950/70 border border-slate-800 px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-xl sm:rounded-2xl flex items-center justify-between sm:block text-left sm:text-right w-full sm:w-auto">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider sm:block">
+            Valor estimado<span className="hidden sm:inline"> de colección</span>
           </span>
-          <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">
-            ${totalCollectionValue.toFixed(2)} <span className="text-xs text-emerald-500">USD</span>
+          <span className="text-base sm:text-2xl font-black text-emerald-400 font-mono">
+            ${totalCollectionValue.toFixed(2)} <span className="text-[10px] sm:text-xs text-emerald-500">USD</span>
           </span>
         </div>
       </div>
 
       {/* Album Controls: Search & Sort */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-slate-950/40 p-3 rounded-2xl border border-slate-850">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center justify-between bg-slate-950/40 p-2.5 sm:p-3 rounded-2xl border border-slate-850">
         <div className="relative flex-1">
           <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
             <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -77,7 +77,7 @@ export const TcgAlbumView = ({
             value={albumSearchQuery}
             onChange={(e) => setAlbumSearchQuery(e.target.value)}
             placeholder="Buscar en tu álbum por nombre o rareza..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
+            className="w-full pl-10 pr-4 py-1.5 sm:py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-base sm:text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
           />
           {albumSearchQuery && (
             <button
@@ -91,12 +91,12 @@ export const TcgAlbumView = ({
         </div>
 
         {/* Sort Selector */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between sm:justify-start gap-2">
           <span className="text-xs text-slate-400 font-semibold whitespace-nowrap">Ordenar por:</span>
           <select
             value={albumSortBy}
             onChange={(e) => setAlbumSortBy(e.target.value as any)}
-            className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
+            className="flex-1 sm:flex-initial bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-3 py-1.5 sm:py-2 focus:outline-none focus:border-amber-500 cursor-pointer"
           >
             <option value="date_desc">Añadidas recientemente</option>
             <option value="price_desc">Mayor valor ($$$)</option>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { getSetIconUrl } from '../constants/pokemon';
 import type { TcgCardBrief, TcgSetBrief, UserCollectionItem } from '../types/pokemon';
 
@@ -96,11 +97,16 @@ export const TcgExplorerView = ({
 
   useEffect(() => {
     if (!showAllSetsModal) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setShowAllSetsModal(false);
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [showAllSetsModal]);
 
   const recentAndActiveSets = useMemo(() => {
@@ -121,29 +127,32 @@ export const TcgExplorerView = ({
   }, [tcgExplorerSets, setFilterQuery]);
 
   return (
-    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
+    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-3 sm:p-6 shadow-2xl space-y-3.5 sm:space-y-6 animate-scale-up">
       {/* Explorer Header & Search Banner */}
-      <div className="bg-gradient-to-r from-rose-500/15 via-slate-900 to-amber-500/15 border border-rose-500/30 p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-2xl shadow-lg shadow-rose-500/10">
-            🃏
+      <div className="bg-gradient-to-r from-rose-500/15 via-slate-900 to-amber-500/15 border border-rose-500/30 p-3 sm:p-5 rounded-2xl flex flex-col md:flex-row gap-2.5 sm:gap-4 items-center justify-between">
+        <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto">
+          <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-lg sm:text-2xl shadow-lg shadow-rose-500/10 flex-shrink-0">
+            <svg className="w-5 h-5 sm:w-6 sm:h-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="5" y="3" width="14" height="18" rx="2" strokeWidth="2" />
+              <path strokeLinecap="round" strokeWidth="2" d="M9 8h6M9 12h6M9 16h3" />
+            </svg>
           </div>
-          <div>
-            <h3 className="text-lg font-black text-white flex items-center gap-2">
-              <span>Explorador Global de Cartas TCG</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold">
-                TCGdex API
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm sm:text-lg font-black text-white flex items-center gap-2 truncate">
+              <span className="truncate">Explorador Global TCG</span>
+              <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold whitespace-nowrap flex-shrink-0">
+                TCGdex
               </span>
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="hidden sm:block text-xs text-slate-400">
               Busca libremente cualquier carta (Pokémon, Entrenadores, Objetos, Energías) o navega por expansiones oficiales completas.
             </p>
           </div>
         </div>
 
-        {/* Quick Popular Searches */}
-        <div className="flex flex-wrap items-center gap-1.5 justify-center md:justify-end">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mr-1">Populares:</span>
+        {/* Quick Popular Searches (single horizontal row on mobile) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto sm:flex-wrap w-full md:w-auto sm:justify-end pb-0.5 scrollbar-thin">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mr-0.5 flex-shrink-0">Populares:</span>
           {['Charizard', 'Pikachu', 'Mewtwo', 'Gengar', 'Profesor', 'Ultra Ball', 'Iono'].map((quickTerm) => (
             <button
               key={quickTerm}
@@ -152,7 +161,7 @@ export const TcgExplorerView = ({
                 setTcgExplorerQuery(quickTerm);
                 onExecuteSearch(quickTerm);
               }}
-              className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 text-slate-300 border border-slate-700 font-medium transition-all cursor-pointer"
+              className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 text-slate-300 border border-slate-700 font-medium transition-all cursor-pointer"
             >
               {quickTerm}
             </button>
@@ -179,7 +188,7 @@ export const TcgExplorerView = ({
               type="text"
               value={tcgExplorerQuery}
               onChange={(e) => setTcgExplorerQuery(e.target.value)}
-              placeholder="Busca en español o inglés, con o sin acentos (ej. pokepad, poketableta, Ultra Ball)..."
+              placeholder="Escribe el nombre de cualquier carta, entrenador u objeto (ej. Ultra Ball, Charizard, Miriam)..."
               className="w-full pl-10 pr-9 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
             />
             {tcgExplorerQuery && (
@@ -256,107 +265,108 @@ export const TcgExplorerView = ({
         )}
 
         {/* Searchable All-Sets Modal */}
-        {showAllSetsModal && (
-          <div
-            onClick={() => setShowAllSetsModal(false)}
-            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in"
-          >
+        {showAllSetsModal &&
+          createPortal(
             <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 relative"
+              onClick={() => setShowAllSetsModal(false)}
+              className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in"
             >
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
-                    <span>📦 Todas las Expansiones TCG</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
-                      {filteredAllSets.length}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Busca por nombre o código de expansión (ej. Dominio Delta, 151, Base, Paldea).
-                  </p>
-                </div>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-3xl max-h-[85vh] flex flex-col bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 relative"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <span>📦 Todas las Expansiones TCG</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
+                        {filteredAllSets.length}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Busca por nombre o código de expansión (ej. Dominio Delta, 151, Base, Paldea).
+                    </p>
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowAllSetsModal(false)}
-                  aria-label="Cerrar selector de expansiones"
-                  className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 rounded-full transition-colors cursor-pointer"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Filter Input */}
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </span>
-                <input
-                  type="text"
-                  autoFocus
-                  value={setFilterQuery}
-                  onChange={(e) => setSetFilterQuery(e.target.value)}
-                  placeholder="Filtrar expansión (ej. Dominio Delta, 151, me06, Base)..."
-                  className="w-full pl-10 pr-9 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500"
-                />
-                {setFilterQuery && (
                   <button
                     type="button"
-                    onClick={() => setSetFilterQuery('')}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white cursor-pointer text-xs font-bold"
+                    onClick={() => setShowAllSetsModal(false)}
+                    aria-label="Cerrar selector de expansiones"
+                    className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 rounded-full transition-colors cursor-pointer shrink-0"
                   >
-                    ✕
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                   </button>
-                )}
-              </div>
+                </div>
 
-              {/* Scrollable Grid of Expansions */}
-              <div className="max-h-[55vh] overflow-y-auto pr-1 scrollbar-thin grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                {filteredAllSets.length === 0 ? (
-                  <div className="col-span-full py-10 text-center text-xs text-slate-400">
-                    No hay expansiones que coincidan con "{setFilterQuery}".
-                  </div>
-                ) : (
-                  filteredAllSets.map((set) => {
-                    const isSelected = selectedSetId === set.id;
-                    return (
-                      <button
-                        key={set.id}
-                        type="button"
-                        onClick={() => {
-                          onLoadSetCards(set.id);
-                          setShowAllSetsModal(false);
-                        }}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all cursor-pointer group min-w-0 ${
-                          isSelected
-                            ? 'bg-rose-500/20 border-rose-500/60 text-white'
-                            : 'bg-slate-950/60 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700 text-slate-300'
-                        }`}
-                      >
-                        <SetIcon set={set} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold truncate leading-tight">{set.name}</p>
-                          <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
-                            <span className="uppercase">{set.id}</span>
-                            {set.cardCount?.total !== undefined && (
-                              <span>• {set.cardCount.total} cartas</span>
-                            )}
+                {/* Filter Input */}
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </span>
+                  <input
+                    type="text"
+                    value={setFilterQuery}
+                    onChange={(e) => setSetFilterQuery(e.target.value)}
+                    placeholder="Filtrar expansión (ej. Dominio Delta, 151, me06, Base)..."
+                    className="w-full pl-10 pr-9 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500"
+                  />
+                  {setFilterQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSetFilterQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white cursor-pointer text-xs font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Scrollable Grid of Expansions */}
+                <div className="flex-1 min-h-0 max-h-[55vh] overflow-y-auto pr-1 scrollbar-thin grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {filteredAllSets.length === 0 ? (
+                    <div className="col-span-full py-10 text-center text-xs text-slate-400">
+                      No hay expansiones que coincidan con "{setFilterQuery}".
+                    </div>
+                  ) : (
+                    filteredAllSets.map((set) => {
+                      const isSelected = selectedSetId === set.id;
+                      return (
+                        <button
+                          key={set.id}
+                          type="button"
+                          onClick={() => {
+                            onLoadSetCards(set.id);
+                            setShowAllSetsModal(false);
+                          }}
+                          className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all cursor-pointer group min-w-0 ${
+                            isSelected
+                              ? 'bg-rose-500/20 border-rose-500/60 text-white'
+                              : 'bg-slate-950/60 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700 text-slate-300'
+                          }`}
+                        >
+                          <SetIcon set={set} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold truncate leading-tight">{set.name}</p>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                              <span className="uppercase">{set.id}</span>
+                              {set.cardCount?.total !== undefined && (
+                                <span>• {set.cardCount.total} cartas</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
       </div>
 
       {/* Results Header with Count & Sort Controls */}

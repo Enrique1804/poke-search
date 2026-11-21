@@ -25,6 +25,16 @@ export const WhoIsThatPokemon = ({
   const [revealed, setRevealed] = useState<boolean>(false);
   const [showTypeHint, setShowTypeHint] = useState<boolean>(false);
   const [isPlayingCry, setIsPlayingCry] = useState<boolean>(false);
+  const [showRegionModal, setShowRegionModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!showRegionModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowRegionModal(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showRegionModal]);
 
   const [streak, setStreak] = useState<number>(0);
   const [totalCorrect, setTotalCorrect] = useState<number>(0);
@@ -112,6 +122,9 @@ export const WhoIsThatPokemon = ({
     setTotalPlayed((prev) => prev + 1);
 
     if (opt.id === targetPokemon.id) {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(35);
+      }
       const nextStreak = streak + 1;
       setStreak(nextStreak);
       setTotalCorrect((prev) => prev + 1);
@@ -122,6 +135,9 @@ export const WhoIsThatPokemon = ({
         } catch {}
       }
     } else {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([35, 35, 35]);
+      }
       setStreak(0);
     }
   };
@@ -155,96 +171,179 @@ export const WhoIsThatPokemon = ({
   const isCorrect = revealed && selectedOptionId === targetPokemon?.id;
 
   return (
-    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
-      {/* Header & Scoreboard */}
-      <div className="bg-gradient-to-r from-indigo-500/15 via-slate-900 to-rose-500/15 border border-indigo-500/30 p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-2xl shadow-lg shadow-indigo-500/10">
+    <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-3 sm:p-6 shadow-2xl space-y-3 sm:space-y-5 animate-scale-up">
+      {/* Header & Compact Scoreboard */}
+      <div className="bg-gradient-to-r from-indigo-500/15 via-slate-900 to-rose-500/15 border border-indigo-500/30 p-3 sm:p-4 rounded-2xl flex flex-col md:flex-row gap-2.5 sm:gap-4 items-center justify-between">
+        <div className="flex items-center gap-2.5 w-full md:w-auto">
+          <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-lg sm:text-xl flex-shrink-0">
             🎮
           </div>
-          <div>
-            <h3 className="text-lg font-black text-white flex items-center gap-2">
-              <span>¿Quién es ese Pokémon?</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm sm:text-lg font-black text-white flex items-center gap-2 truncate">
+              <span className="truncate">¿Quién es ese Pokémon?</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold flex-shrink-0">
                 Trivia
               </span>
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="hidden sm:block text-xs text-slate-400">
               Adivina el Pokémon por su silueta o escucha su grito oficial para mantener tu racha.
             </p>
           </div>
         </div>
 
-        {/* Score Badges */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-center">
-          <div className="bg-slate-950/70 border border-slate-800 px-3.5 py-2 rounded-xl text-center min-w-[82px]">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">Racha</span>
-            <span className="text-base font-black text-amber-400 font-mono">🔥 {streak}</span>
+        {/* Single-row 3-col Score Badges */}
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5 w-full md:w-auto">
+          <div className="bg-slate-950/70 border border-slate-800 px-2 sm:px-3.5 py-1.5 rounded-xl text-center">
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block leading-tight">Racha</span>
+            <span className="text-xs sm:text-base font-black text-amber-400 font-mono">🔥 {streak}</span>
           </div>
-          <div className="bg-slate-950/70 border border-slate-800 px-3.5 py-2 rounded-xl text-center min-w-[82px]">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">Récord</span>
-            <span className="text-base font-black text-emerald-400 font-mono">🏆 {bestStreak}</span>
+          <div className="bg-slate-950/70 border border-slate-800 px-2 sm:px-3.5 py-1.5 rounded-xl text-center">
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block leading-tight">Récord</span>
+            <span className="text-xs sm:text-base font-black text-emerald-400 font-mono">🏆 {bestStreak}</span>
           </div>
-          <div className="bg-slate-950/70 border border-slate-800 px-3.5 py-2 rounded-xl text-center min-w-[82px]">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">Aciertos</span>
-            <span className="text-base font-black text-sky-400 font-mono">
+          <div className="bg-slate-950/70 border border-slate-800 px-2 sm:px-3.5 py-1.5 rounded-xl text-center">
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block leading-tight">Aciertos</span>
+            <span className="text-xs sm:text-base font-black text-sky-400 font-mono">
               {totalCorrect}/{totalPlayed}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Generation Selector */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-        <span className="text-[11px] font-bold text-slate-400 mr-1 flex-shrink-0">Región:</span>
+      {/* Prominent Single-Row Region / Difficulty Selector Bar */}
+      <div className="bg-slate-950/60 border border-indigo-500/30 rounded-2xl px-3 py-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-sm flex-shrink-0">
+            🌍
+          </span>
+          <div className="min-w-0">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 block leading-none">
+              Región en juego
+            </span>
+            <p className="text-xs font-black text-white truncate mt-0.5">
+              {selectedGenId === null
+                ? 'Todas (1 - 1,025)'
+                : (() => {
+                    const g = GENERATIONS.find((x) => x.id === selectedGenId);
+                    return g ? `${g.name} · ${g.region}` : 'Gen 1';
+                  })()}
+            </p>
+          </div>
+        </div>
+
         <button
           type="button"
-          onClick={() => setSelectedGenId(null)}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 ${
-            selectedGenId === null
-              ? 'bg-indigo-500 text-white shadow-sm'
-              : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
+          onClick={() => setShowRegionModal(true)}
+          className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
         >
-          Todas (1-1025)
+          <span>🗺️</span>
+          <span>Cambiar</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-white font-mono">
+            ▾
+          </span>
         </button>
-        {GENERATIONS.map((gen) => (
-          <button
-            key={gen.id}
-            type="button"
-            onClick={() => setSelectedGenId(gen.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 border ${
-              selectedGenId === gen.id
-                ? 'bg-indigo-500 text-white border-indigo-400 shadow-md shadow-indigo-500/20'
-                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-            }`}
-          >
-            {gen.name} ({gen.region})
-          </button>
-        ))}
       </div>
+
+      {/* Region Selector Modal */}
+      {showRegionModal && (
+        <div
+          onClick={() => setShowRegionModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4 relative"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-black text-white">🗺️ Elige una Región / Generación</h3>
+                <p className="text-xs text-slate-400">Selecciona qué Pokémon aparecerán en la trivia.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRegionModal(false)}
+                aria-label="Cerrar"
+                className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1 scrollbar-thin">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedGenId(null);
+                  setShowRegionModal(false);
+                }}
+                className={`sm:col-span-2 p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                  selectedGenId === null
+                    ? 'bg-indigo-500/20 border-indigo-400 text-white'
+                    : 'bg-slate-950/60 hover:bg-slate-800/80 border-slate-800 text-slate-300'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-black block">🌐 Todas las Generaciones</span>
+                  <span className="text-[11px] text-slate-400">Reto completo (Kanto a Paldea)</span>
+                </div>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-slate-800 text-indigo-300">
+                  1,025
+                </span>
+              </button>
+
+              {GENERATIONS.map((gen) => (
+                <button
+                  key={gen.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedGenId(gen.id);
+                    setShowRegionModal(false);
+                  }}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    selectedGenId === gen.id
+                      ? 'bg-indigo-500/20 border-indigo-400 text-white'
+                      : 'bg-slate-950/60 hover:bg-slate-800/80 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div>
+                    <span className="text-xs font-bold block">{gen.name} · {gen.region}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      #{gen.startId} – #{gen.endId}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300">
+                    {gen.endId - gen.startId + 1}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Arena */}
       {loadingRound || !targetPokemon ? (
-        <div className="py-20 flex flex-col items-center justify-center space-y-3">
+        <div className="py-16 flex flex-col items-center justify-center space-y-3">
           <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
           <p className="text-xs text-slate-400 font-semibold animate-pulse">
             Preparando silueta misteriosa...
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-center">
           {/* Silhouette / Reveal Stage */}
-          <div className="relative bg-gradient-to-br from-slate-950 via-indigo-950/40 to-slate-950 border border-slate-800 rounded-3xl p-6 flex flex-col items-center justify-center min-h-[290px] overflow-hidden">
+          <div className="relative bg-gradient-to-br from-slate-950 via-indigo-950/40 to-slate-950 border border-slate-800 rounded-3xl p-4 sm:p-6 flex flex-col items-center justify-center min-h-[220px] sm:min-h-[290px] overflow-hidden">
             {/* Subtle Pokéball decorative ring */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10">
-              <div className="w-56 h-56 rounded-full border-[12px] border-indigo-400" />
+              <div className="w-44 h-44 sm:w-56 sm:h-56 rounded-full border-[12px] border-indigo-400" />
             </div>
 
             {/* Revealed Type Glow */}
             {revealed && (
               <div
-                className={`absolute w-48 h-48 rounded-full blur-3xl opacity-35 transition-opacity duration-700 pointer-events-none ${primaryColor.bg.replace(
+                className={`absolute w-40 h-40 sm:w-48 sm:h-48 rounded-full blur-3xl opacity-35 transition-opacity duration-700 pointer-events-none ${primaryColor.bg.replace(
                   '/20',
                   '/90'
                 )}`}
@@ -252,7 +351,7 @@ export const WhoIsThatPokemon = ({
             )}
 
             {/* Top Badges */}
-            <div className="w-full flex items-center justify-between z-10 mb-2">
+            <div className="w-full flex items-center justify-between z-10 mb-1 sm:mb-2">
               <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-slate-400">
                 {revealed ? `#${targetPokemon.id.toString().padStart(3, '0')}` : '#???'}
               </span>
@@ -287,7 +386,7 @@ export const WhoIsThatPokemon = ({
             </div>
 
             {/* Pokémon Artwork */}
-            <div className="relative w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center my-2 z-10">
+            <div className="relative w-36 h-36 sm:w-52 sm:h-52 flex items-center justify-center my-1 sm:my-2 z-10">
               <img
                 src={artworkUrl}
                 alt={revealed ? targetPokemon.name : 'Pokémon misterioso'}
@@ -301,7 +400,7 @@ export const WhoIsThatPokemon = ({
 
             {/* Type Hint or Revealed Types */}
             {(showTypeHint || revealed) && (
-              <div className="flex items-center gap-1.5 mt-2 z-10">
+              <div className="flex items-center gap-1.5 mt-1.5 z-10">
                 {targetPokemon.types.map((t) => {
                   const badge = TYPE_COLORS[t.type.name] || TYPE_COLORS.normal;
                   return (
@@ -318,9 +417,9 @@ export const WhoIsThatPokemon = ({
           </div>
 
           {/* Options & Result Column */}
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+          <div className="space-y-3 sm:space-y-4">
+            <div className="space-y-0.5 sm:space-y-1">
+              <h4 className="text-xs sm:text-sm font-bold text-slate-300 uppercase tracking-wider">
                 {revealed
                   ? isCorrect
                     ? '🎉 ¡Correcto!'
@@ -328,14 +427,14 @@ export const WhoIsThatPokemon = ({
                   : 'Selecciona la respuesta correcta:'}
               </h4>
               {revealed && (
-                <p className="text-2xl font-black capitalize text-white tracking-tight">
+                <p className="text-xl sm:text-2xl font-black capitalize text-white tracking-tight">
                   {targetPokemon.name}
                 </p>
               )}
             </div>
 
-            {/* 4 Multiple Choice Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* 4 Multiple Choice Buttons (2x2 even on mobile so it fits in 1 screen) */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
               {options.map((opt) => {
                 const isTarget = opt.id === targetPokemon.id;
                 const isSelected = opt.id === selectedOptionId;
@@ -360,7 +459,7 @@ export const WhoIsThatPokemon = ({
                     type="button"
                     disabled={revealed}
                     onClick={() => handleSelectOption(opt)}
-                    className={`px-4 py-3.5 rounded-2xl border font-bold text-sm capitalize transition-all flex items-center justify-between ${
+                    className={`px-3 py-3 sm:px-4 sm:py-3.5 rounded-2xl border font-bold text-xs sm:text-sm capitalize transition-all flex items-center justify-between gap-1 min-h-[48px] ${
                       revealed ? 'cursor-default' : 'cursor-pointer active:scale-95'
                     } ${btnStyle}`}
                   >

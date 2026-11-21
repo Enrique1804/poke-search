@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ALL_TYPES,
   GENERATIONS,
@@ -45,10 +46,13 @@ export const PokedexGridView = ({
   onSelectPokemon,
   onToggleFavorite,
 }: PokedexGridViewProps) => {
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const activeFilterCount = (selectedGen !== null ? 1 : 0) + (selectedType !== null ? 1 : 0);
+
   return (
     <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
       {/* Filter Bar Controls */}
-      <div className="space-y-4 bg-slate-950/40 border border-slate-850 p-4 rounded-2xl">
+      <div className="space-y-4 bg-slate-950/40 border border-slate-850 p-3.5 sm:p-4 rounded-2xl">
         {/* Search input inside Grid + Sort dropdown */}
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="relative flex-1">
@@ -62,7 +66,7 @@ export const PokedexGridView = ({
               value={gridSearchQuery}
               onChange={(e) => setGridSearchQuery(e.target.value)}
               placeholder="Filtrar por nombre o #ID en el catálogo..."
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
+              className="w-full pl-10 pr-8 py-2.5 bg-slate-900/80 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-base sm:text-xs font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
             />
             {gridSearchQuery && (
               <button
@@ -75,22 +79,45 @@ export const PokedexGridView = ({
             )}
           </div>
 
-          {/* Sort selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 font-semibold whitespace-nowrap">Ordenar:</span>
-            <select
-              value={gridSortBy}
-              onChange={(e) => setGridSortBy(e.target.value as any)}
-              className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-3 py-2.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+          {/* Sort selector + Mobile Filters Toggle */}
+          <div className="flex items-center justify-between sm:justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowMobileFilters((v) => !v)}
+              className={`md:hidden flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                showMobileFilters || activeFilterCount > 0
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                  : 'bg-slate-900 text-slate-300 border-slate-800'
+              }`}
             >
-              <option value="id_asc"># Pokédex (1 → 1025)</option>
-              <option value="id_desc"># Pokédex (1025 → 1)</option>
-              <option value="name_asc">Nombre (A → Z)</option>
-              <option value="name_desc">Nombre (Z → A)</option>
-            </select>
+              <span>🎛️</span>
+              <span>Filtros</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-mono">
+                  {activeFilterCount}
+                </span>
+              )}
+              <span className="text-[10px] opacity-75">{showMobileFilters ? '▴' : '▾'}</span>
+            </button>
+
+            <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end">
+              <span className="hidden sm:inline text-xs text-slate-400 font-semibold whitespace-nowrap">Ordenar:</span>
+              <select
+                value={gridSortBy}
+                onChange={(e) => setGridSortBy(e.target.value as any)}
+                className="w-full sm:w-auto min-w-0 bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-3 py-2.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+              >
+                <option value="id_asc"># Pokédex (1 → 1025)</option>
+                <option value="id_desc"># Pokédex (1025 → 1)</option>
+                <option value="name_asc">Nombre (A → Z)</option>
+                <option value="name_desc">Nombre (Z → A)</option>
+              </select>
+            </div>
           </div>
         </div>
 
+        {/* Collapsible on mobile, always visible on md+ */}
+        <div className={`space-y-4 ${showMobileFilters ? 'block pt-2 border-t border-slate-800/70' : 'hidden'} md:block`}>
         {/* Generations Pills (horizontal scroll) */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
@@ -185,6 +212,7 @@ export const PokedexGridView = ({
               );
             })}
           </div>
+        </div>
         </div>
       </div>
 

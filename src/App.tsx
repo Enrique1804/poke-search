@@ -159,6 +159,29 @@ function App() {
     }
   };
 
+  // Mobile OS Back Button (History API) & Swipe Gesture Refs
+  const isHandlingPopStateRef = useRef(false);
+  const visualSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const navigateView = (nextView: 'detail' | 'grid' | 'tcg_explorer' | 'album' | 'minigame') => {
+    if (nextView !== viewMode && !isHandlingPopStateRef.current) {
+      window.history.pushState(
+        { viewMode: nextView, activeTab, pokemonName: pokemon?.name || null },
+        ''
+      );
+    }
+    setViewMode(nextView);
+  };
+
+  const closeCardModal = () => {
+    if (window.history.state?.modal === 'card') {
+      window.history.back();
+    } else {
+      setSelectedCard(null);
+      setCardModalLoading(false);
+    }
+  };
+
   // Pre-load all 1025 Pokemon species names for instant real-time suggestions
   useEffect(() => {
     const loadSpeciesList = async () => {
@@ -478,6 +501,7 @@ function App() {
 
   const getTcgQuery = (speciesName: string) => {
     const s = speciesName.toLowerCase().trim();
+    if (s === 'nidoran-m' || s === 'nidoran-f') return 'nidoran';
     if (s === 'ho-oh') return 'ho-oh';
     if (s === 'porygon-z') return 'porygon-z';
     if (s.startsWith('mr-')) return s.replace('mr-', 'mr. ');
@@ -506,9 +530,17 @@ function App() {
         }
       }
       if (Array.isArray(cardsData)) {
-        // Strict word boundary filter to eliminate false substring positives (e.g. Hoppip when searching Ho-Oh, Mewtwo when searching Mew)
-        const escaped = clean.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\s+/g, '[\\s\\-\\.]*');
-        const pattern = new RegExp(`(^|[^a-zA-Z0-9])${escaped}([^a-zA-Z0-9]|$)`, 'i');
+        // Strict word boundary filter (and gender-symbol matching for Nidoran♂ / Nidoran♀)
+        const lowerName = pokeName.toLowerCase().trim();
+        let pattern: RegExp;
+        if (lowerName === 'nidoran-m') {
+          pattern = /nidoran\s*♂/i;
+        } else if (lowerName === 'nidoran-f') {
+          pattern = /nidoran\s*♀/i;
+        } else {
+          const escaped = clean.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\s+/g, '[\\s\\-\\.]*');
+          pattern = new RegExp(`(^|[^a-zA-Z0-9])${escaped}([^a-zA-Z0-9]|$)`, 'i');
+        }
 
         const validCards = cardsData.filter((c) => c.image && pattern.test(c.name));
         setTcgCards(validCards);
@@ -549,6 +581,12 @@ function App() {
   };
 
   const handleCardClick = async (card: TcgCardBrief) => {
+    if (window.history.state?.modal !== 'card') {
+      window.history.pushState(
+        { modal: 'card', viewMode, activeTab, pokemonName: pokemon?.name || null },
+        ''
+      );
+    }
     setCardModalLoading(true);
     setSelectedCard(null);
     try {
@@ -638,6 +676,9 @@ function App() {
   // Toggle Card Collection item
   const toggleCardCollection = (card: { id: string; name: string; localId: string; image?: string; rarity?: string; price?: number }) => {
     const exists = userCollection.some((c) => c.id === card.id);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(20);
+    }
     showToast(
       exists
         ? `Carta "${card.name}" quitada de Mi Álbum`
@@ -698,22 +739,7 @@ function App() {
     return list;
   }, [userCollection, albumSearchQuery, albumSortBy]);
 
-  const tcgCardIndexRef = useRef<{
-    esCards: TcgCardBrief[];
-    enCards: TcgCardBrief[];
-    esMap: Map<string, TcgCardBrief>;
-  } | null>(null);
-
-  const normalizeSearchText = (str: string) =>
-    str
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-
-  const normalizeCompactText = (str: string) =>
-    normalizeSearchText(str).replace(/[^a-z0-9]/g, '');
-
-  // Execute Search in Global TCG Explorer (bilingual ES + EN, accent-insensitive & space-tolerant)
+  // Execute Search in Global TCG Explorer (fast direct ES + EN API query)
   const executeTcgExplorerSearch = async (searchTerm?: string) => {
     const q = (searchTerm !== undefined ? searchTerm : tcgExplorerQuery).trim();
     if (!q) return;
@@ -721,76 +747,24 @@ function App() {
     setTcgExplorerLoading(true);
     setSelectedSetId(null);
     try {
-      // Load full ES + EN card index once in memory for instant accent/space-insensitive bilingual search
-      if (!tcgCardIndexRef.current) {
-        const [esRes, enRes] = await Promise.all([
-          fetch('https://api.tcgdex.net/v2/es/cards').catch(() => null),
-          fetch('https://api.tcgdex.net/v2/en/cards').catch(() => null),
-        ]);
-        const esRaw: any[] = esRes && esRes.ok ? await esRes.json() : [];
-        const enRaw: any[] = enRes && enRes.ok ? await enRes.json() : [];
-
-        const mapCard = (c: any): TcgCardBrief => ({
-          id: c.id,
-          localId: c.localId || '?',
-          name: c.name || c.id,
-          image: c.image,
-        });
-
-        const esCards = Array.isArray(esRaw) ? esRaw.map(mapCard) : [];
-        const enCards = Array.isArray(enRaw) ? enRaw.map(mapCard) : [];
-        const esMap = new Map<string, TcgCardBrief>(esCards.map((c) => [c.id, c]));
-
-        if (esCards.length > 0 || enCards.length > 0) {
-          tcgCardIndexRef.current = { esCards, enCards, esMap };
+      const [esRes, enRes] = await Promise.all([
+        fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(q)}`).catch(() => null),
+        fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(q)}`).catch(() => null),
+      ]);
+      const esList: any[] = esRes && esRes.ok ? await esRes.json() : [];
+      const enList: any[] = enRes && enRes.ok ? await enRes.json() : [];
+      const merged = new Map<string, TcgCardBrief>();
+      [...(Array.isArray(esList) ? esList : []), ...(Array.isArray(enList) ? enList : [])].forEach((c: any) => {
+        if (!merged.has(c.id)) {
+          merged.set(c.id, {
+            id: c.id,
+            localId: c.localId || '?',
+            name: c.name || c.id,
+            image: c.image,
+          });
         }
-      }
-
-      let formattedCards: TcgCardBrief[] = [];
-      const index = tcgCardIndexRef.current;
-
-      if (index) {
-        const normQ = normalizeSearchText(q);
-        const compactQ = normalizeCompactText(q);
-        const matched = new Map<string, TcgCardBrief>();
-
-        const isMatch = (name: string) =>
-          normalizeSearchText(name).includes(normQ) ||
-          (compactQ.length >= 3 && normalizeCompactText(name).includes(compactQ));
-
-        for (const c of index.esCards) {
-          if (isMatch(c.name)) {
-            matched.set(c.id, c);
-          }
-        }
-        for (const c of index.enCards) {
-          if (isMatch(c.name) && !matched.has(c.id)) {
-            // Prefer Spanish card entry if available for the same ID
-            matched.set(c.id, index.esMap.get(c.id) || c);
-          }
-        }
-        formattedCards = Array.from(matched.values());
-      } else {
-        // Direct API fallback if full index failed to load
-        const [esRes, enRes] = await Promise.all([
-          fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(q)}`).catch(() => null),
-          fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(q)}`).catch(() => null),
-        ]);
-        const esList: any[] = esRes && esRes.ok ? await esRes.json() : [];
-        const enList: any[] = enRes && enRes.ok ? await enRes.json() : [];
-        const merged = new Map<string, TcgCardBrief>();
-        [...esList, ...enList].forEach((c: any) => {
-          if (!merged.has(c.id)) {
-            merged.set(c.id, {
-              id: c.id,
-              localId: c.localId || '?',
-              name: c.name || c.id,
-              image: c.image,
-            });
-          }
-        });
-        formattedCards = Array.from(merged.values());
-      }
+      });
+      const formattedCards = Array.from(merged.values());
 
       setTcgExplorerCards(formattedCards);
       setTcgExplorerDisplayCount(36);
@@ -1162,6 +1136,14 @@ function App() {
 
       // Trigger TCG card search using clean species name
       fetchTcgCards(data.species.name || data.name);
+
+      // Push to browser history so mobile OS Back button navigates cleanly instead of exiting
+      if (!isHandlingPopStateRef.current && window.history.state?.pokemonName !== data.name) {
+        window.history.pushState(
+          { viewMode: 'detail', activeTab, pokemonName: data.name },
+          ''
+        );
+      }
     } catch (err) {
       setPokemon(null);
       setCurrentPokemonData(null);
@@ -1497,7 +1479,7 @@ function App() {
 
       if ((e.key === '/' && !isInput) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) {
         e.preventDefault();
-        setViewMode('detail');
+        navigateView('detail');
         setTimeout(() => {
           searchInputRef.current?.focus();
           searchInputRef.current?.select();
@@ -1514,8 +1496,61 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
+  // Keep latest handlers/state accessible for mobile OS Back button (popstate)
+  const latestPopRef = useRef({
+    selectedCard,
+    cardModalLoading,
+    showInstallModal,
+    pokemonName: pokemon?.name || null,
+    executeSearch,
+  });
+  latestPopRef.current = {
+    selectedCard,
+    cardModalLoading,
+    showInstallModal,
+    pokemonName: pokemon?.name || null,
+    executeSearch,
+  };
+
+  useEffect(() => {
+    if (!window.history.state) {
+      window.history.replaceState({ viewMode: 'detail', activeTab: 'info', pokemonName: null }, '');
+    }
+
+    const onPopState = (e: PopStateEvent) => {
+      const cur = latestPopRef.current;
+
+      if (cur.selectedCard || cur.cardModalLoading) {
+        setSelectedCard(null);
+        setCardModalLoading(false);
+        return;
+      }
+
+      if (cur.showInstallModal) {
+        setShowInstallModal(false);
+        return;
+      }
+
+      const state = e.state;
+      if (!state) return;
+
+      isHandlingPopStateRef.current = true;
+      if (state.viewMode) setViewMode(state.viewMode);
+      if (state.activeTab) setActiveTab(state.activeTab);
+      if (state.pokemonName && state.pokemonName !== cur.pokemonName) {
+        cur.executeSearch(state.pokemonName);
+      }
+      window.setTimeout(() => {
+        isHandlingPopStateRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-rose-500 selection:text-white flex flex-col justify-start md:justify-center pt-6 pb-24 md:py-10 px-3 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-rose-500 selection:text-white flex flex-col justify-start md:justify-center pt-5 pb-24 md:py-10 px-3 sm:px-6 lg:px-8">
       {/* Background Gradient Orbs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-rose-500/10 blur-[120px]" />
@@ -1526,8 +1561,8 @@ function App() {
         viewMode === 'detail' ? 'max-w-2xl lg:max-w-5xl' : 'max-w-6xl'
       }`}>
         {/* Header */}
-        <div className="text-center mb-5 sm:mb-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 backdrop-blur-md mb-2.5">
+        <div className="text-center mb-4 sm:mb-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 backdrop-blur-md mb-2">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
             <span className="text-[10px] font-bold tracking-wider text-rose-400 uppercase">Pokédex + Combate Competitivo + TCG</span>
           </div>
@@ -1563,12 +1598,16 @@ function App() {
               PokéSearch
             </h1>
           </div>
-          <p className="text-slate-400 text-xs sm:text-sm max-w-lg mx-auto px-2">
+          <p className={`text-slate-400 text-xs sm:text-sm max-w-lg mx-auto px-2 ${
+            viewMode !== 'detail' || currentPokemonData ? 'hidden sm:block' : ''
+          }`}>
             Explora los 1025 Pokémon, consulta análisis de combate competitivo, formas alternativas y colecciona cartas oficiales TCG.
           </p>
 
           {!isStandaloneApp && (
-            <div className="mt-3 flex justify-center">
+            <div className={`mt-2.5 sm:mt-3 flex justify-center ${
+              viewMode !== 'detail' || currentPokemonData ? 'hidden sm:flex' : ''
+            }`}>
               <button
                 type="button"
                 onClick={handleInstallShortcut}
@@ -1584,7 +1623,7 @@ function App() {
           <div className="hidden md:inline-flex sticky top-3 z-40 flex-wrap justify-center items-center p-1.5 mt-5 bg-slate-900/90 border border-slate-800/90 rounded-2xl shadow-xl shadow-black/40 backdrop-blur-xl gap-1">
             <button
               type="button"
-              onClick={() => setViewMode('detail')}
+              onClick={() => navigateView('detail')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'detail'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
@@ -1596,7 +1635,7 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('grid')}
+              onClick={() => navigateView('grid')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'grid'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
@@ -1614,7 +1653,7 @@ function App() {
             <button
               type="button"
               onClick={() => {
-                setViewMode('tcg_explorer');
+                navigateView('tcg_explorer');
                 if (tcgExplorerCards.length === 0 && !tcgExplorerQuery) {
                   executeTcgExplorerSearch('Pikachu');
                 }
@@ -1633,7 +1672,7 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('album')}
+              onClick={() => navigateView('album')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'album'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
@@ -1650,7 +1689,7 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('minigame')}
+              onClick={() => navigateView('minigame')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'minigame'
                   ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20'
@@ -1682,8 +1721,8 @@ function App() {
             gridDisplayCount={gridDisplayCount}
             setGridDisplayCount={setGridDisplayCount}
             onSelectPokemon={(name) => {
+              navigateView('detail');
               searchByName(name);
-              setViewMode('detail');
             }}
             onToggleFavorite={toggleFavorite}
           />
@@ -1717,14 +1756,14 @@ function App() {
             setAlbumSortBy={setAlbumSortBy}
             onCardClick={handleCardClick}
             onToggleCollection={toggleCardCollection}
-            onExploreGrid={() => setViewMode('grid')}
+            onExploreGrid={() => navigateView('grid')}
           />
         ) : viewMode === 'minigame' ? (
           <WhoIsThatPokemon
             allPokemonNames={allPokemonList}
             onInspectPokemon={(name) => {
+              navigateView('detail');
               searchByName(name);
-              setViewMode('detail');
             }}
           />
         ) : (
@@ -1982,8 +2021,32 @@ function App() {
                 {activeTab === 'info' && (
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                     <div className="lg:col-span-5 space-y-5">
-                    {/* Visual Section (Image & Glow) */}
-                    <div className="relative flex flex-col items-center justify-center pt-4 pb-6 bg-slate-950/40 border border-slate-800/60 rounded-3xl overflow-hidden group">
+                    {/* Visual Section (Image & Glow — swipe left/right on mobile for next/prev) */}
+                    <div
+                      onTouchStart={(e) => {
+                        if (e.touches.length === 1) {
+                          visualSwipeStartRef.current = {
+                            x: e.touches[0].clientX,
+                            y: e.touches[0].clientY,
+                          };
+                        }
+                      }}
+                      onTouchEnd={(e) => {
+                        const start = visualSwipeStartRef.current;
+                        visualSwipeStartRef.current = null;
+                        if (!start || e.changedTouches.length === 0 || loading || !pokemon) return;
+                        const dx = e.changedTouches[0].clientX - start.x;
+                        const dy = e.changedTouches[0].clientY - start.y;
+                        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                          if (dx < 0 && pokemon.id < 1025) {
+                            handleNextPokemon();
+                          } else if (dx > 0 && pokemon.id > 1) {
+                            handlePrevPokemon();
+                          }
+                        }
+                      }}
+                      className="relative flex flex-col items-center justify-center pt-4 pb-6 bg-slate-950/40 border border-slate-800/60 rounded-3xl overflow-hidden group"
+                    >
                       {/* Dynamic glow base on primary type */}
                       <div className={`absolute w-36 h-36 rounded-full opacity-35 blur-3xl ${getPrimaryTypeColor(currentPokemonData).bg.replace('/20', '/60')}`} />
 
@@ -2593,7 +2656,7 @@ function App() {
 
                       {/* Opponent Search Bar */}
                       <div ref={opponentContainerRef} className="relative">
-                        <div className="flex gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
                           <input
                             type="text"
                             value={opponentQuery}
@@ -2608,14 +2671,14 @@ function App() {
                                 searchOpponent(opponentQuery);
                               }
                             }}
-                            placeholder="Elige un rival (ej: Blastoise, Gengar, Mewtwo, Lucario)..."
-                            className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
+                            placeholder="Elige un rival (ej: Blastoise, Gengar, Mewtwo)..."
+                            className="w-full sm:flex-1 min-w-0 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
                           />
                           <button
                             type="button"
                             onClick={() => searchOpponent(opponentQuery)}
                             disabled={opponentLoading || !opponentQuery.trim()}
-                            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-rose-300 font-bold text-xs rounded-2xl border border-slate-700 transition-all cursor-pointer"
+                            className="w-full sm:w-auto flex-shrink-0 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-rose-300 font-bold text-xs rounded-2xl border border-slate-700 transition-all cursor-pointer"
                           >
                             {opponentLoading ? 'Cargando...' : 'Comparar'}
                           </button>
@@ -2958,10 +3021,7 @@ function App() {
         selectedCard={selectedCard}
         cardModalLoading={cardModalLoading}
         userCollection={userCollection}
-        onClose={() => {
-          setSelectedCard(null);
-          setCardModalLoading(false);
-        }}
+        onClose={closeCardModal}
         onToggleCollection={toggleCardCollection}
       />
 
@@ -3056,7 +3116,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setViewMode('detail');
+              navigateView('detail');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
@@ -3072,7 +3132,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setViewMode('grid');
+              navigateView('grid');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
@@ -3088,7 +3148,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setViewMode('tcg_explorer');
+              navigateView('tcg_explorer');
               if (tcgExplorerCards.length === 0 && !tcgExplorerQuery) {
                 executeTcgExplorerSearch('Pikachu');
               }
@@ -3110,7 +3170,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setViewMode('album');
+              navigateView('album');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className={`relative flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
@@ -3131,7 +3191,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setViewMode('minigame');
+              navigateView('minigame');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
