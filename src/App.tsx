@@ -91,6 +91,73 @@ function App() {
   const [allPokemonList, setAllPokemonList] = useState<QuickPokemon[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // UX feedback: Toast & Scroll-to-Top button
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+    }, 2400);
+  };
+
+  useEffect(() => {
+    const onScroll = () => {
+      setShowScrollTop(window.scrollY > 360);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // PWA Install / Home Screen Shortcut state
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [isStandaloneApp, setIsStandaloneApp] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      Boolean((window.navigator as any).standalone)
+    );
+  });
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsStandaloneApp(true);
+      showToast('📲 ¡PokéSearch instalada en tu dispositivo!');
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallShortcut = async () => {
+    if (deferredInstallPrompt) {
+      try {
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setDeferredInstallPrompt(null);
+        }
+      } catch {
+        setShowInstallModal(true);
+      }
+    } else {
+      setShowInstallModal(true);
+    }
+  };
 
   // Pre-load all 1025 Pokemon species names for instant real-time suggestions
   useEffect(() => {
@@ -165,7 +232,7 @@ function App() {
     loadTypesMap();
   }, []);
 
-  // Pre-load TCG Sets for Global TCG Explorer
+  // Pre-load TCG Sets for Global TCG Explorer (stale-while-revalidate + newest first)
   useEffect(() => {
     const loadTcgSets = async () => {
       try {
@@ -173,8 +240,7 @@ function App() {
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setTcgExplorerSets(parsed);
-            return;
+            setTcgExplorerSets([...parsed].reverse());
           }
         }
         let res = await fetch('https://api.tcgdex.net/v2/es/sets');
@@ -188,8 +254,8 @@ function App() {
             setsData = await enRes.json();
           }
         }
-        if (Array.isArray(setsData)) {
-          setTcgExplorerSets(setsData);
+        if (Array.isArray(setsData) && setsData.length > 0) {
+          setTcgExplorerSets([...setsData].reverse());
           try {
             localStorage.setItem('poke_tcg_sets_cache', JSON.stringify(setsData));
           } catch {}
@@ -383,14 +449,15 @@ function App() {
 
   // Toggle favorite status
   const toggleFavorite = (poke: QuickPokemon) => {
+    const exists = favorites.some((f) => f.id === poke.id);
+    showToast(
+      exists
+        ? `Quitado ${poke.name} de Favoritos`
+        : `⭐ ${poke.name} añadido a Favoritos`
+    );
     setFavorites((prev) => {
-      const exists = prev.some((f) => f.id === poke.id);
-      let updated: QuickPokemon[];
-      if (exists) {
-        updated = prev.filter((f) => f.id !== poke.id);
-      } else {
-        updated = [poke, ...prev];
-      }
+      const prevExists = prev.some((f) => f.id === poke.id);
+      const updated = prevExists ? prev.filter((f) => f.id !== poke.id) : [poke, ...prev];
       try {
         localStorage.setItem('poke_favorites', JSON.stringify(updated));
       } catch (err) {
@@ -570,10 +637,16 @@ function App() {
 
   // Toggle Card Collection item
   const toggleCardCollection = (card: { id: string; name: string; localId: string; image?: string; rarity?: string; price?: number }) => {
+    const exists = userCollection.some((c) => c.id === card.id);
+    showToast(
+      exists
+        ? `Carta "${card.name}" quitada de Mi Álbum`
+        : `💼 "${card.name}" añadida a Mi Álbum TCG`
+    );
     setUserCollection((prev) => {
-      const exists = prev.some((c) => c.id === card.id);
+      const prevExists = prev.some((c) => c.id === card.id);
       let updated: UserCollectionItem[];
-      if (exists) {
+      if (prevExists) {
         updated = prev.filter((c) => c.id !== card.id);
       } else {
         updated = [
@@ -625,7 +698,22 @@ function App() {
     return list;
   }, [userCollection, albumSearchQuery, albumSortBy]);
 
-  // Execute Search in Global TCG Explorer
+  const tcgCardIndexRef = useRef<{
+    esCards: TcgCardBrief[];
+    enCards: TcgCardBrief[];
+    esMap: Map<string, TcgCardBrief>;
+  } | null>(null);
+
+  const normalizeSearchText = (str: string) =>
+    str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+  const normalizeCompactText = (str: string) =>
+    normalizeSearchText(str).replace(/[^a-z0-9]/g, '');
+
+  // Execute Search in Global TCG Explorer (bilingual ES + EN, accent-insensitive & space-tolerant)
   const executeTcgExplorerSearch = async (searchTerm?: string) => {
     const q = (searchTerm !== undefined ? searchTerm : tcgExplorerQuery).trim();
     if (!q) return;
@@ -633,55 +721,108 @@ function App() {
     setTcgExplorerLoading(true);
     setSelectedSetId(null);
     try {
-      let res = await fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(q)}`);
-      let list: any[] = [];
-      if (res.ok) {
-        list = await res.json();
-      }
-      if (!Array.isArray(list) || list.length === 0) {
-        const enRes = await fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(q)}`);
-        if (enRes.ok) {
-          list = await enRes.json();
-        }
-      }
-      if (Array.isArray(list)) {
-        const formattedCards: TcgCardBrief[] = list.map((c: any) => ({
+      // Load full ES + EN card index once in memory for instant accent/space-insensitive bilingual search
+      if (!tcgCardIndexRef.current) {
+        const [esRes, enRes] = await Promise.all([
+          fetch('https://api.tcgdex.net/v2/es/cards').catch(() => null),
+          fetch('https://api.tcgdex.net/v2/en/cards').catch(() => null),
+        ]);
+        const esRaw: any[] = esRes && esRes.ok ? await esRes.json() : [];
+        const enRaw: any[] = enRes && enRes.ok ? await enRes.json() : [];
+
+        const mapCard = (c: any): TcgCardBrief => ({
           id: c.id,
           localId: c.localId || '?',
           name: c.name || c.id,
           image: c.image,
-        }));
-        setTcgExplorerCards(formattedCards);
-        setTcgExplorerDisplayCount(36);
-
-        // Fetch prices for top results in background
-        const sampleCards = formattedCards.slice(0, 30);
-        Promise.all(
-          sampleCards.map((c) =>
-            fetch(`https://api.tcgdex.net/v2/es/cards/${c.id}`)
-              .then((r) => (r.ok ? r.json() : null))
-              .catch(() => null)
-          )
-        ).then((details) => {
-          const detailMap = new Map<string, { rarity?: string; price?: number }>();
-          details.filter(Boolean).forEach((d: any) => {
-            const price =
-              d.pricing?.tcgplayer?.holofoil?.marketPrice ||
-              d.pricing?.tcgplayer?.normal?.marketPrice ||
-              d.pricing?.tcgplayer?.marketPrice ||
-              d.pricing?.cardmarket?.avg ||
-              0;
-            detailMap.set(d.id, { rarity: d.rarity, price });
-          });
-
-          setTcgExplorerCards((prev) =>
-            prev.map((c) => {
-              const meta = detailMap.get(c.id);
-              return meta ? { ...c, rarity: meta.rarity, price: meta.price } : c;
-            })
-          );
         });
+
+        const esCards = Array.isArray(esRaw) ? esRaw.map(mapCard) : [];
+        const enCards = Array.isArray(enRaw) ? enRaw.map(mapCard) : [];
+        const esMap = new Map<string, TcgCardBrief>(esCards.map((c) => [c.id, c]));
+
+        if (esCards.length > 0 || enCards.length > 0) {
+          tcgCardIndexRef.current = { esCards, enCards, esMap };
+        }
       }
+
+      let formattedCards: TcgCardBrief[] = [];
+      const index = tcgCardIndexRef.current;
+
+      if (index) {
+        const normQ = normalizeSearchText(q);
+        const compactQ = normalizeCompactText(q);
+        const matched = new Map<string, TcgCardBrief>();
+
+        const isMatch = (name: string) =>
+          normalizeSearchText(name).includes(normQ) ||
+          (compactQ.length >= 3 && normalizeCompactText(name).includes(compactQ));
+
+        for (const c of index.esCards) {
+          if (isMatch(c.name)) {
+            matched.set(c.id, c);
+          }
+        }
+        for (const c of index.enCards) {
+          if (isMatch(c.name) && !matched.has(c.id)) {
+            // Prefer Spanish card entry if available for the same ID
+            matched.set(c.id, index.esMap.get(c.id) || c);
+          }
+        }
+        formattedCards = Array.from(matched.values());
+      } else {
+        // Direct API fallback if full index failed to load
+        const [esRes, enRes] = await Promise.all([
+          fetch(`https://api.tcgdex.net/v2/es/cards?name=${encodeURIComponent(q)}`).catch(() => null),
+          fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(q)}`).catch(() => null),
+        ]);
+        const esList: any[] = esRes && esRes.ok ? await esRes.json() : [];
+        const enList: any[] = enRes && enRes.ok ? await enRes.json() : [];
+        const merged = new Map<string, TcgCardBrief>();
+        [...esList, ...enList].forEach((c: any) => {
+          if (!merged.has(c.id)) {
+            merged.set(c.id, {
+              id: c.id,
+              localId: c.localId || '?',
+              name: c.name || c.id,
+              image: c.image,
+            });
+          }
+        });
+        formattedCards = Array.from(merged.values());
+      }
+
+      setTcgExplorerCards(formattedCards);
+      setTcgExplorerDisplayCount(36);
+
+      // Fetch prices for top results in background
+      const sampleCards = formattedCards.slice(0, 30);
+      Promise.all(
+        sampleCards.map((c) =>
+          fetch(`https://api.tcgdex.net/v2/es/cards/${c.id}`)
+            .then((r) => (r.ok ? r : fetch(`https://api.tcgdex.net/v2/en/cards/${c.id}`)))
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+        )
+      ).then((details) => {
+        const detailMap = new Map<string, { rarity?: string; price?: number }>();
+        details.filter(Boolean).forEach((d: any) => {
+          const price =
+            d.pricing?.tcgplayer?.holofoil?.marketPrice ||
+            d.pricing?.tcgplayer?.normal?.marketPrice ||
+            d.pricing?.tcgplayer?.marketPrice ||
+            d.pricing?.cardmarket?.avg ||
+            0;
+          detailMap.set(d.id, { rarity: d.rarity, price });
+        });
+
+        setTcgExplorerCards((prev) =>
+          prev.map((c) => {
+            const meta = detailMap.get(c.id);
+            return meta ? { ...c, rarity: meta.rarity, price: meta.price } : c;
+          })
+        );
+      });
     } catch (err) {
       console.error('Error in TCG Explorer search:', err);
     } finally {
@@ -1349,8 +1490,32 @@ function App() {
     return { label: '🌱 Fase Básica', color: 'text-slate-400 bg-slate-500/15 border-slate-500/30' };
   };
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+      if ((e.key === '/' && !isInput) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) {
+        e.preventDefault();
+        setViewMode('detail');
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }, 50);
+      } else if (!isInput && !selectedCard && viewMode === 'detail' && pokemon) {
+        if (e.key === 'ArrowLeft' && pokemon.id > 1 && !loading) {
+          handlePrevPokemon();
+        } else if (e.key === 'ArrowRight' && pokemon.id < 1025 && !loading) {
+          handleNextPokemon();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-rose-500 selection:text-white flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-rose-500 selection:text-white flex flex-col justify-start md:justify-center pt-6 pb-24 md:py-10 px-3 sm:px-6 lg:px-8">
       {/* Background Gradient Orbs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-rose-500/10 blur-[120px]" />
@@ -1358,27 +1523,47 @@ function App() {
       </div>
 
       <div className={`relative z-10 sm:mx-auto sm:w-full transition-all duration-300 ${
-        viewMode === 'detail' ? 'max-w-2xl' : 'max-w-6xl'
+        viewMode === 'detail' ? 'max-w-2xl lg:max-w-5xl' : 'max-w-6xl'
       }`}>
         {/* Header */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 backdrop-blur-md mb-3">
+        <div className="text-center mb-5 sm:mb-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 backdrop-blur-md mb-2.5">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
             <span className="text-[10px] font-bold tracking-wider text-rose-400 uppercase">Pokédex + Combate Competitivo + TCG</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-white mb-2 bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400 bg-clip-text text-transparent">
-            PokéSearch
-          </h1>
-          <p className="text-slate-400 text-sm max-w-lg mx-auto">
+          <div className="flex items-center justify-center gap-2.5 sm:gap-3 mb-1.5 sm:mb-2">
+            <img
+              src={`${import.meta.env.BASE_URL}favicon.svg`}
+              alt="PokéSearch Logo"
+              className="w-9 h-9 sm:w-11 sm:h-11 drop-shadow-[0_0_12px_rgba(244,63,94,0.4)] select-none"
+            />
+            <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400 bg-clip-text text-transparent">
+              PokéSearch
+            </h1>
+          </div>
+          <p className="text-slate-400 text-xs sm:text-sm max-w-lg mx-auto px-2">
             Explora los 1025 Pokémon, consulta análisis de combate competitivo, formas alternativas y colecciona cartas oficiales TCG.
           </p>
 
-          {/* View Mode Switcher: Ficha Detallada vs Catálogo Pokédex vs Mi Álbum TCG */}
-          <div className="inline-flex flex-wrap justify-center items-center p-1 mt-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg backdrop-blur-md gap-1">
+          {!isStandaloneApp && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={handleInstallShortcut}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900/90 hover:bg-rose-500/15 border border-slate-700/80 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-[11px] font-bold transition-all cursor-pointer shadow-md active:scale-95"
+              >
+                <span>📲</span>
+                <span>{deferredInstallPrompt ? 'Instalar App en tu dispositivo' : 'Crear acceso directo en inicio'}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Sticky PC View Mode Switcher (hidden on mobile; mobile uses Bottom Nav Bar) */}
+          <div className="hidden md:inline-flex sticky top-3 z-40 flex-wrap justify-center items-center p-1.5 mt-5 bg-slate-900/90 border border-slate-800/90 rounded-2xl shadow-xl shadow-black/40 backdrop-blur-xl gap-1">
             <button
               type="button"
               onClick={() => setViewMode('detail')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'detail'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -1390,7 +1575,7 @@ function App() {
             <button
               type="button"
               onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'grid'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -1412,19 +1597,22 @@ function App() {
                   executeTcgExplorerSearch('Pikachu');
                 }
               }}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'tcg_explorer'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <span>🃏</span>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <rect x="5" y="3" width="14" height="18" rx="2" strokeWidth="2" />
+                <path strokeLinecap="round" strokeWidth="2" d="M9 8h6M9 12h6M9 16h3" />
+              </svg>
               <span>Explorador TCG</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('album')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'album'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800/50'
@@ -1441,7 +1629,7 @@ function App() {
             <button
               type="button"
               onClick={() => setViewMode('minigame')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'minigame'
                   ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20'
                   : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800/50'
@@ -1531,6 +1719,7 @@ function App() {
                   </svg>
                 </span>
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={query}
                   onFocus={() => setShowSuggestions(true)}
@@ -1538,9 +1727,26 @@ function App() {
                     setQuery(e.target.value);
                     setShowSuggestions(true);
                   }}
-                  placeholder="Escribe un Pokémon (ej: Zygarde, Vivillon, Charizard, Blastoise)..."
-                  className="w-full pl-11 pr-4 py-3 bg-slate-950/60 border border-slate-800 rounded-2xl text-white placeholder-slate-550 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all text-sm font-medium"
+                  placeholder="Escribe un Pokémon (ej: Zygarde, Charizard, Pikachu)..."
+                  className="w-full pl-11 pr-9 py-3 bg-slate-950/60 border border-slate-800 rounded-2xl text-white placeholder-slate-550 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all text-base sm:text-sm font-medium"
                 />
+                {query ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery('');
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Limpiar búsqueda"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white cursor-pointer text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                ) : (
+                  <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-500 bg-slate-900 border border-slate-800 rounded-md absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    /
+                  </kbd>
+                )}
 
                 {/* Real-time Matches Dropdown */}
                 {showSuggestions && suggestions.length > 0 && (
@@ -1703,88 +1909,66 @@ function App() {
             {!loading && !error && currentPokemonData && (
               <div className="space-y-6 animate-scale-up">
                 {/* 3-Tab Switcher */}
-                <div className="flex border-b border-slate-800/80 gap-1 sm:gap-2">
+                <div className="flex border-b border-slate-800/80 gap-1 sm:gap-2 overflow-x-auto scrollbar-thin">
                   <button
                     type="button"
                     onClick={() => setActiveTab('info')}
-                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                    className={`pb-3 px-2.5 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 sm:flex-none ${
                       activeTab === 'info'
                         ? 'border-rose-500 text-white'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <span>🎮 Ficha Técnica</span>
+                    <span>🎮</span>
+                    <span>Ficha Técnica</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('combat')}
-                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                    className={`pb-3 px-2.5 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 sm:flex-none ${
                       activeTab === 'combat'
                         ? 'border-rose-500 text-white'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <span>⚔️ Combate y Versus</span>
+                    <span>⚔️</span>
+                    <span>Combate y Versus</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('tcg')}
-                    className={`pb-3 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+                    className={`pb-3 px-2.5 sm:px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 sm:flex-none ${
                       activeTab === 'tcg'
                         ? 'border-rose-500 text-white'
                         : 'border-transparent text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <span>🃏 Cartas TCG</span>
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <rect x="5" y="3" width="14" height="18" rx="2" strokeWidth="2" />
+                      <path strokeLinecap="round" strokeWidth="2" d="M9 8h6M9 12h6M9 16h3" />
+                    </svg>
+                    <span>Cartas TCG</span>
                     {tcgCards.length > 0 && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30 leading-none">
                         {tcgCards.length}
                       </span>
                     )}
                   </button>
                 </div>
 
-                {/* Tab 1: Info General */}
+                {/* Tab 1: Info General (2-Column Grid on PC, 1-Column on Mobile) */}
                 {activeTab === 'info' && (
-                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    <div className="lg:col-span-5 space-y-5">
                     {/* Visual Section (Image & Glow) */}
-                    <div className="relative flex flex-col items-center justify-center py-6 bg-slate-950/40 border border-slate-800/60 rounded-3xl overflow-hidden group">
+                    <div className="relative flex flex-col items-center justify-center pt-4 pb-6 bg-slate-950/40 border border-slate-800/60 rounded-3xl overflow-hidden group">
                       {/* Dynamic glow base on primary type */}
                       <div className={`absolute w-36 h-36 rounded-full opacity-35 blur-3xl ${getPrimaryTypeColor(currentPokemonData).bg.replace('/20', '/60')}`} />
-                      
-                      {/* Navigation Prev & Next Controls + Badge ID */}
-                      <div className="absolute top-4 right-4 flex items-center gap-1.5 z-20">
-                        <button
-                          type="button"
-                          disabled={pokemon!.id <= 1 || loading}
-                          onClick={handlePrevPokemon}
-                          title={pokemon!.id > 1 ? `Ir al Nº ${(pokemon!.id - 1).toString().padStart(3, '0')}` : undefined}
-                          className="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                          </svg>
-                        </button>
 
-                        <span className="text-xs font-mono font-bold text-slate-400 px-1">
-                          Nº {currentPokemonData.id.toString().padStart(3, '0')}
-                        </span>
-
-                        <button
-                          type="button"
-                          disabled={pokemon!.id >= 1025 || loading}
-                          onClick={handleNextPokemon}
-                          title={pokemon!.id < 1025 ? `Ir al Nº ${(pokemon!.id + 1).toString().padStart(3, '0')}` : undefined}
-                          className="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                      </div>
-
-                      {/* Top Action Buttons (Shiny, Mega, G-Max, Primal, Regional & Forms) */}
-                      <div className="absolute top-4 left-4 flex flex-wrap gap-2 z-20 max-w-[65%]">
+                      {/* Non-overlapping Top Bar: Action Buttons (Left) + Prev/Next Navigator (Right) */}
+                      <div className="w-full px-3 sm:px-4 flex flex-wrap items-center justify-between gap-2 z-20 mb-2">
+                        {/* Top Action Buttons (Shiny, Mega, G-Max, Primal, Regional & Forms) */}
+                        <div className="flex flex-wrap gap-1.5">
                         {/* Shiny Toggle Button */}
                         <button
                           type="button"
@@ -1869,6 +2053,38 @@ function App() {
                             {getFormButtonLabel(form.name, pokemon!.species.name || pokemon!.name, activeFormIndex === idx)}
                           </button>
                         ))}
+                        </div>
+
+                        {/* Navigation Prev & Next Controls + Badge ID */}
+                        <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                          <button
+                            type="button"
+                            disabled={pokemon!.id <= 1 || loading}
+                            onClick={handlePrevPokemon}
+                            title={pokemon!.id > 1 ? `Ir al Nº ${(pokemon!.id - 1).toString().padStart(3, '0')}` : undefined}
+                            className="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                            </svg>
+                          </button>
+
+                          <span className="text-xs font-mono font-bold text-slate-400 px-1 whitespace-nowrap">
+                            Nº {currentPokemonData.id.toString().padStart(3, '0')}
+                          </span>
+
+                          <button
+                            type="button"
+                            disabled={pokemon!.id >= 1025 || loading}
+                            onClick={handleNextPokemon}
+                            title={pokemon!.id < 1025 ? `Ir al Nº ${(pokemon!.id + 1).toString().padStart(3, '0')}` : undefined}
+                            className="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Main Sprite (Cosmetic Form Aware) */}
@@ -1883,7 +2099,7 @@ function App() {
                             : (currentPokemonData.sprites.other['official-artwork'].front_default || currentPokemonData.sprites.front_default)
                         }
                         alt={currentPokemonData.name}
-                        className="w-36 h-36 object-contain relative z-10 drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)] transition-transform duration-500 hover:scale-105 mt-6 sm:mt-2"
+                        className="w-36 h-36 object-contain relative z-10 drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)] transition-transform duration-500 hover:scale-105 mt-2"
                       />
 
                       {/* Title, Audio Cry & Favorite Button */}
@@ -2085,7 +2301,9 @@ function App() {
                         </div>
                       </div>
                     )}
+                    </div>
 
+                    <div className="lg:col-span-7 space-y-6">
                     {/* Statistics Grid */}
                     <div>
                       <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Estadísticas Base</h3>
@@ -2128,6 +2346,7 @@ function App() {
                         </div>
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
 
@@ -2531,13 +2750,13 @@ function App() {
                               )}
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:items-center gap-2">
                               {/* Rarity filter */}
                               {availableRarities.length > 0 && (
                                 <select
                                   value={tcgRarityFilter}
                                   onChange={(e) => setTcgRarityFilter(e.target.value)}
-                                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                                  className="w-full min-w-0 bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-2 focus:outline-none focus:border-rose-500 cursor-pointer"
                                 >
                                   <option value="all">Todas las rarezas</option>
                                   {availableRarities.map((r) => (
@@ -2552,7 +2771,7 @@ function App() {
                               <select
                                 value={tcgSortBy}
                                 onChange={(e) => setTcgSortBy(e.target.value as any)}
-                                className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                                className="w-full min-w-0 bg-slate-900 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl px-2.5 py-2 focus:outline-none focus:border-rose-500 cursor-pointer"
                               >
                                 <option value="default">Orden por defecto</option>
                                 <option value="price_desc">Mayor valor ($$$)</option>
@@ -2723,6 +2942,187 @@ function App() {
         }}
         onToggleCollection={toggleCardCollection}
       />
+
+      {/* Install / Home Screen Shortcut Guide Modal */}
+      {showInstallModal && (
+        <div
+          onClick={() => setShowInstallModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 relative"
+          >
+            <button
+              type="button"
+              onClick={() => setShowInstallModal(false)}
+              aria-label="Cerrar guía"
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800 rounded-full cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="flex items-center gap-3">
+              <img
+                src={`${import.meta.env.BASE_URL}icon-192.png`}
+                alt="PokéSearch App Icon"
+                className="w-12 h-12 rounded-2xl border border-slate-700 shadow-lg"
+              />
+              <div>
+                <h3 className="text-base font-black text-white">Crear acceso directo</h3>
+                <p className="text-xs text-slate-400">Usa PokéSearch como app en tu pantalla de inicio</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300">
+              <div className="bg-slate-950/60 border border-slate-800 p-3.5 rounded-2xl space-y-1.5">
+                <p className="font-bold text-rose-400">🤖 Android (Chrome / Edge)</p>
+                <p className="text-slate-400 leading-relaxed">
+                  1. Toca el botón de menú <strong className="text-white">⋮</strong> arriba a la derecha.<br />
+                  2. Elige <strong className="text-white">"Instalar aplicación"</strong> o <strong className="text-white">"Agregar a la pantalla principal"</strong>.
+                </p>
+              </div>
+
+              <div className="bg-slate-950/60 border border-slate-800 p-3.5 rounded-2xl space-y-1.5">
+                <p className="font-bold text-sky-400">🍎 iPhone / iPad (Safari)</p>
+                <p className="text-slate-400 leading-relaxed">
+                  1. Toca el botón <strong className="text-white">Compartir</strong> (cuadro con flecha hacia arriba) en la barra inferior.<br />
+                  2. Desliza y selecciona <strong className="text-white">"Agregar a inicio"</strong>.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowInstallModal(false)}
+              className="w-full py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Feedback Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 right-4 left-4 sm:left-auto sm:max-w-xs z-50 pointer-events-none flex justify-center sm:justify-end animate-fade-in">
+          <div className="bg-slate-900/95 border border-slate-700/80 text-slate-100 text-xs font-bold px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2">
+            <span>{toastMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Scroll-to-Top Button */}
+      {showScrollTop && (
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Volver arriba"
+          className="fixed bottom-20 md:bottom-6 right-4 z-30 p-3 rounded-2xl bg-slate-900/90 hover:bg-rose-500 text-slate-300 hover:text-white border border-slate-700/80 hover:border-rose-400 shadow-xl backdrop-blur-xl transition-all cursor-pointer active:scale-95"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
+      )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-950/90 border-t border-slate-800/90 backdrop-blur-xl px-1.5 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+        <div className="grid grid-cols-5 gap-1 max-w-md mx-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('detail');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              viewMode === 'detail'
+                ? 'bg-rose-500/20 text-rose-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-base leading-none mb-0.5">🔍</span>
+            <span>Ficha</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('grid');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              viewMode === 'grid'
+                ? 'bg-rose-500/20 text-rose-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-base leading-none mb-0.5">🗂️</span>
+            <span>Catálogo</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('tcg_explorer');
+              if (tcgExplorerCards.length === 0 && !tcgExplorerQuery) {
+                executeTcgExplorerSearch('Pikachu');
+              }
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              viewMode === 'tcg_explorer'
+                ? 'bg-rose-500/20 text-rose-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <svg className="w-4 h-4 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="5" y="3" width="14" height="18" rx="2" strokeWidth="2" />
+              <path strokeLinecap="round" strokeWidth="2" d="M9 8h6M9 12h6M9 16h3" />
+            </svg>
+            <span>TCG</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('album');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              viewMode === 'album'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'text-slate-400 hover:text-amber-300'
+            }`}
+          >
+            <span className="text-base leading-none mb-0.5">💼</span>
+            <span>Álbum</span>
+            {userCollection.length > 0 && (
+              <span className="absolute top-1 right-2 px-1 min-w-[14px] h-3.5 rounded-full bg-amber-500 text-slate-950 text-[9px] font-mono font-black flex items-center justify-center">
+                {userCollection.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('minigame');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              viewMode === 'minigame'
+                ? 'bg-indigo-500/20 text-indigo-300'
+                : 'text-slate-400 hover:text-indigo-300'
+            }`}
+          >
+            <span className="text-base leading-none mb-0.5">🎮</span>
+            <span>Juego</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }

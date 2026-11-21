@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { TcgCardDetail, UserCollectionItem } from '../types/pokemon';
 
 interface CardInspectorModalProps {
@@ -37,12 +37,20 @@ export const CardInspectorModal = ({
     active: false,
   });
 
+  useEffect(() => {
+    if (!selectedCard && !cardModalLoading) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedCard, cardModalLoading, onClose]);
+
   if (!selectedCard && !cardModalLoading) return null;
 
-  const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+  const updateTiltFromClient = (clientX: number, clientY: number, rect: DOMRect) => {
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    const y = Math.min(Math.max(clientY - rect.top, 0), rect.height);
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
 
@@ -54,18 +62,39 @@ export const CardInspectorModal = ({
     setCardTilt({ x: rotateX, y: rotateY, glareX, glareY, active: true });
   };
 
-  const handleCardMouseLeave = () => {
+  const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    updateTiltFromClient(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
+  };
+
+  const handleCardTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 0) {
+      updateTiltFromClient(
+        e.touches[0].clientX,
+        e.touches[0].clientY,
+        e.currentTarget.getBoundingClientRect()
+      );
+    }
+  };
+
+  const handleCardResetTilt = () => {
     setCardTilt({ x: 0, y: 0, glareX: 50, glareY: 50, active: false });
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-2xl overflow-hidden my-auto">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-2xl overflow-hidden my-auto"
+      >
         {/* Close button */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-750 rounded-full transition-colors cursor-pointer z-20"
+          aria-label="Cerrar inspector"
+          className="absolute top-3.5 right-3.5 p-2.5 text-slate-400 hover:text-white bg-slate-800/90 hover:bg-slate-750 rounded-full transition-colors cursor-pointer z-30"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -81,12 +110,15 @@ export const CardInspectorModal = ({
 
         {!cardModalLoading && selectedCard && (
           <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
-            {/* 3D Tilt Card Image with Holographic Glare */}
+            {/* 3D Tilt Card Image with Holographic Glare (Mouse + Touch) */}
             <div className="flex flex-col items-center gap-2">
               <div
                 onMouseMove={handleCardMouseMove}
-                onMouseLeave={handleCardMouseLeave}
-                className="w-56 sm:w-64 flex-shrink-0 aspect-[2.5/3.5] rounded-2xl relative shadow-2xl shadow-rose-500/10 cursor-grab active:cursor-grabbing select-none"
+                onMouseLeave={handleCardResetTilt}
+                onTouchStart={handleCardTouchMove}
+                onTouchMove={handleCardTouchMove}
+                onTouchEnd={handleCardResetTilt}
+                className="w-56 sm:w-64 flex-shrink-0 aspect-[2.5/3.5] rounded-2xl relative shadow-2xl shadow-rose-500/10 cursor-grab active:cursor-grabbing select-none touch-none"
                 style={{
                   perspective: '1000px',
                 }}

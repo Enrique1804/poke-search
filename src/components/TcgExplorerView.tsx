@@ -1,5 +1,51 @@
+import { useState, useEffect, useMemo } from 'react';
 import { getSetIconUrl } from '../constants/pokemon';
 import type { TcgCardBrief, TcgSetBrief, UserCollectionItem } from '../types/pokemon';
+
+const SetIcon = ({ set }: { set: TcgSetBrief }) => {
+  const iconUrl = getSetIconUrl(set);
+  return (
+    <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-950/70 border border-slate-800 p-0.5 relative overflow-hidden">
+      {iconUrl ? (
+        <>
+          <img
+            src={iconUrl}
+            alt={set.name}
+            loading="lazy"
+            className="max-w-full max-h-full object-contain filter drop-shadow group-hover:scale-110 transition-transform"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              if (set.symbol && target.src.includes('/en/')) {
+                target.src = set.symbol + '.png';
+              } else if (set.logo && !target.src.includes('logo')) {
+                target.src = `${set.logo}.png`;
+              } else {
+                target.style.display = 'none';
+                const fb = target.parentElement?.querySelector('.set-fallback-icon') as HTMLElement;
+                if (fb) fb.style.display = 'flex';
+              }
+            }}
+          />
+          <div className="set-fallback-icon hidden w-full h-full items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle cx="12" cy="12" r="9" strokeWidth="2" />
+              <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
+              <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
+              <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
+            </svg>
+          </div>
+        </>
+      ) : (
+        <svg className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <circle cx="12" cy="12" r="9" strokeWidth="2" />
+          <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
+          <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
+          <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
+        </svg>
+      )}
+    </div>
+  );
+};
 
 interface TcgExplorerViewProps {
   tcgExplorerQuery: string;
@@ -45,6 +91,35 @@ export const TcgExplorerView = ({
   onCardClick,
   onToggleCollection,
 }: TcgExplorerViewProps) => {
+  const [showAllSetsModal, setShowAllSetsModal] = useState(false);
+  const [setFilterQuery, setSetFilterQuery] = useState('');
+
+  useEffect(() => {
+    if (!showAllSetsModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAllSetsModal(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showAllSetsModal]);
+
+  const recentAndActiveSets = useMemo(() => {
+    const recent = tcgExplorerSets.slice(0, 6);
+    if (selectedSetId && !recent.some((s) => s.id === selectedSetId)) {
+      const selected = tcgExplorerSets.find((s) => s.id === selectedSetId);
+      if (selected) return [selected, ...recent];
+    }
+    return recent;
+  }, [tcgExplorerSets, selectedSetId]);
+
+  const filteredAllSets = useMemo(() => {
+    const q = setFilterQuery.trim().toLowerCase();
+    if (!q) return tcgExplorerSets;
+    return tcgExplorerSets.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
+    );
+  }, [tcgExplorerSets, setFilterQuery]);
+
   return (
     <div className="bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 shadow-2xl space-y-6 animate-scale-up">
       {/* Explorer Header & Search Banner */}
@@ -104,8 +179,8 @@ export const TcgExplorerView = ({
               type="text"
               value={tcgExplorerQuery}
               onChange={(e) => setTcgExplorerQuery(e.target.value)}
-              placeholder="Escribe el nombre de cualquier carta, entrenador u objeto (ej. Ultra Ball, Charizard, Miriam)..."
-              className="w-full pl-10 pr-9 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
+              placeholder="Busca en español o inglés, con o sin acentos (ej. pokepad, poketableta, Ultra Ball)..."
+              className="w-full pl-10 pr-9 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition-all"
             />
             {tcgExplorerQuery && (
               <button
@@ -132,75 +207,43 @@ export const TcgExplorerView = ({
           </button>
         </form>
 
-        {/* Expansions / Sets Horizontal Carousel */}
+        {/* Compact Expansions Selector: Recent Highlights + Searchable All Sets Modal */}
         {tcgExplorerSets.length > 0 && (
-          <div className="pt-2 border-t border-slate-800/80 space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <span>📦</span> Expansiones y Sets Oficiales ({tcgExplorerSets.length})
+                <span>📦</span> Expansiones Recientes
               </span>
-              <span className="text-[11px] text-slate-500 italic">Desliza para ver más</span>
+
+              <button
+                type="button"
+                onClick={() => setShowAllSetsModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-900 hover:bg-rose-500/20 text-rose-300 border border-slate-700 hover:border-rose-500/40 text-[11px] font-bold transition-all cursor-pointer active:scale-95"
+              >
+                <span>🔍</span>
+                <span>Explorar todas ({tcgExplorerSets.length})</span>
+              </button>
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-              {tcgExplorerSets.map((set) => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {recentAndActiveSets.map((set) => {
                 const isSelected = selectedSetId === set.id;
-                const iconUrl = getSetIconUrl(set);
                 return (
                   <button
                     key={set.id}
                     type="button"
                     onClick={() => onLoadSetCards(set.id)}
-                    className={`flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-xl border text-left transition-all cursor-pointer group ${
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-left transition-all cursor-pointer group min-w-0 ${
                       isSelected
                         ? 'bg-rose-500/20 border-rose-500/60 text-white shadow-md shadow-rose-500/10'
                         : 'bg-slate-900/80 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700 text-slate-300'
                     }`}
                   >
-                    <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-950/70 border border-slate-800 p-0.5 relative overflow-hidden">
-                      {iconUrl ? (
-                        <>
-                          <img
-                            src={iconUrl}
-                            alt={set.name}
-                            loading="lazy"
-                            className="max-w-full max-h-full object-contain filter drop-shadow group-hover:scale-110 transition-transform"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              if (set.symbol && target.src.includes('/en/')) {
-                                target.src = set.symbol + '.png';
-                              } else if (set.logo && !target.src.includes('logo')) {
-                                target.src = `${set.logo}.png`;
-                              } else {
-                                target.style.display = 'none';
-                                const fb = target.parentElement?.querySelector('.set-fallback-icon') as HTMLElement;
-                                if (fb) fb.style.display = 'flex';
-                              }
-                            }}
-                          />
-                          <div className="set-fallback-icon hidden w-full h-full items-center justify-center">
-                            <svg className="w-3.5 h-3.5 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                              <circle cx="12" cy="12" r="9" strokeWidth="2" />
-                              <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
-                              <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
-                              <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
-                            </svg>
-                          </div>
-                        </>
-                      ) : (
-                        <svg className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <circle cx="12" cy="12" r="9" strokeWidth="2" />
-                          <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2" />
-                          <circle cx="12" cy="12" r="3" fill="currentColor" strokeWidth="1.5" />
-                          <circle cx="12" cy="12" r="1.2" fill="#0f172a" />
-                        </svg>
-                      )}
-                    </div>
-
-                    <div className="max-w-[130px] truncate">
+                    <SetIcon set={set} />
+                    <div className="min-w-0 flex-1">
                       <p className="text-xs font-bold truncate leading-tight">{set.name}</p>
-                      {set.cardCount?.total && (
-                        <p className="text-[10px] text-slate-400 font-mono">
+                      {set.cardCount?.total !== undefined && (
+                        <p className="text-[10px] text-slate-400 font-mono truncate">
                           {set.cardCount.total} cartas
                         </p>
                       )}
@@ -208,6 +251,109 @@ export const TcgExplorerView = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Searchable All-Sets Modal */}
+        {showAllSetsModal && (
+          <div
+            onClick={() => setShowAllSetsModal(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 relative"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                    <span>📦 Todas las Expansiones TCG</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
+                      {filteredAllSets.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Busca por nombre o código de expansión (ej. Dominio Delta, 151, Base, Paldea).
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAllSetsModal(false)}
+                  aria-label="Cerrar selector de expansiones"
+                  className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 rounded-full transition-colors cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Filter Input */}
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={setFilterQuery}
+                  onChange={(e) => setSetFilterQuery(e.target.value)}
+                  placeholder="Filtrar expansión (ej. Dominio Delta, 151, me06, Base)..."
+                  className="w-full pl-10 pr-9 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500"
+                />
+                {setFilterQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSetFilterQuery('')}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white cursor-pointer text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Scrollable Grid of Expansions */}
+              <div className="max-h-[55vh] overflow-y-auto pr-1 scrollbar-thin grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {filteredAllSets.length === 0 ? (
+                  <div className="col-span-full py-10 text-center text-xs text-slate-400">
+                    No hay expansiones que coincidan con "{setFilterQuery}".
+                  </div>
+                ) : (
+                  filteredAllSets.map((set) => {
+                    const isSelected = selectedSetId === set.id;
+                    return (
+                      <button
+                        key={set.id}
+                        type="button"
+                        onClick={() => {
+                          onLoadSetCards(set.id);
+                          setShowAllSetsModal(false);
+                        }}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all cursor-pointer group min-w-0 ${
+                          isSelected
+                            ? 'bg-rose-500/20 border-rose-500/60 text-white'
+                            : 'bg-slate-950/60 hover:bg-slate-800/90 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <SetIcon set={set} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold truncate leading-tight">{set.name}</p>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                            <span className="uppercase">{set.id}</span>
+                            {set.cardCount?.total !== undefined && (
+                              <span>• {set.cardCount.total} cartas</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         )}

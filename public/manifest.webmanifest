@@ -1,0 +1,30 @@
+{
+  "name": "PokéSearch — Pokédex, Combate y TCG",
+  "short_name": "PokéSearch",
+  "description": "Explora los 1025 Pokémon, analiza combate competitivo, colecciona cartas TCG oficiales y juega ¿Quién es ese Pokémon?",
+  "start_url": "/poke-search/",
+  "scope": "/poke-search/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/poke-search/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/poke-search/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/poke-search/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
