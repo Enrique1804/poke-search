@@ -245,31 +245,58 @@ export const formatPokemonTitleName = (fullName: string, speciesName: string) =>
   return `${titleSpecies} ${suffixFormatted}`;
 };
 
+const TIME_OF_DAY_TRANSLATIONS: Record<string, string> = {
+  day: 'Día',
+  night: 'Noche',
+  dusk: 'Atardecer',
+  'full-moon': 'Luna llena',
+};
+
+const pickPrimaryEvolutionDetail = (details: any[]) => {
+  if (!details || details.length === 0) return null;
+  return (
+    details.find((entry) => entry.item) ||
+    details.find((entry) => entry.is_default) ||
+    details[0]
+  );
+};
+
 export const getEvolutionCondition = (details: any[], targetName?: string) => {
   if (targetName?.toLowerCase() === 'clodsire') {
     return 'Nv. 20 (Paldea)';
   }
-  if (!details || details.length === 0) return '';
-  const d = details[0];
+  const d = pickPrimaryEvolutionDetail(details);
+  if (!d) return '';
   let cond = '';
+  const timeLabel = d.time_of_day ? TIME_OF_DAY_TRANSLATIONS[d.time_of_day] || d.time_of_day : '';
+  const moveTypeLabel = d.known_move_type?.name
+    ? TYPE_TRANSLATIONS[d.known_move_type.name] || d.known_move_type.name
+    : '';
 
   if (d.min_level) {
     cond = `Nv. ${d.min_level}`;
     if (d.relative_physical_stats === 1) cond += ' (Atk > Def)';
     else if (d.relative_physical_stats === -1) cond += ' (Def > Atk)';
     else if (d.relative_physical_stats === 0) cond += ' (Atk = Def)';
+    else if (timeLabel) cond += ` (${timeLabel})`;
   } else if (d.item) {
     cond = d.item.name.replace(/-/g, ' ');
+  } else if (d.trigger?.name === 'trade') {
+    cond = d.held_item ? `Intercambio (${d.held_item.name.replace(/-/g, ' ')})` : 'Intercambio';
   } else if (d.held_item) {
     cond = `Con ${d.held_item.name.replace(/-/g, ' ')}`;
   } else if (d.min_happiness) {
-    cond = d.time_of_day ? `Amistad (${d.time_of_day})` : 'Amistad';
-  } else if (d.trigger?.name === 'trade') {
-    cond = d.held_item ? `Intercambio (${d.held_item.name.replace(/-/g, ' ')})` : 'Intercambio';
+    if (moveTypeLabel) cond = `Amistad + Mov. ${moveTypeLabel}`;
+    else cond = timeLabel ? `Amistad (${timeLabel})` : 'Amistad';
+  } else if (d.min_affection) {
+    cond = moveTypeLabel ? `Afecto + Mov. ${moveTypeLabel}` : 'Afecto';
   } else if (d.known_move) {
     cond = `Mov. ${d.known_move.name.replace(/-/g, ' ')}`;
+  } else if (moveTypeLabel) {
+    cond = `Mov. tipo ${moveTypeLabel}`;
   } else if (d.location) {
-    cond = d.location.name.replace(/-/g, ' ');
+    const loc = d.location.name.replace(/-/g, ' ');
+    cond = d.near_special_rock ? `Roca especial (${loc})` : `Subir nivel (${loc})`;
   } else {
     cond = 'Evolución';
   }
@@ -277,9 +304,16 @@ export const getEvolutionCondition = (details: any[], targetName?: string) => {
   return cond;
 };
 
+export const getEvolutionItem = (details: any[]): string | undefined => {
+  const d = pickPrimaryEvolutionDetail(details);
+  if (!d) return undefined;
+  return d.item?.name || d.held_item?.name || undefined;
+};
+
 export const parseEvolutionTree = (chainNode: any, stage = 1): EvolutionNode => {
   const id = parseInt(chainNode.species.url.split('/').filter(Boolean).pop() || '1', 10);
   const condition = stage > 1 ? getEvolutionCondition(chainNode.evolution_details, chainNode.species.name) : undefined;
+  const item = stage > 1 ? getEvolutionItem(chainNode.evolution_details) : undefined;
 
   const children: EvolutionNode[] = (chainNode.evolves_to || []).map((child: any) =>
     parseEvolutionTree(child, stage + 1)
@@ -289,6 +323,7 @@ export const parseEvolutionTree = (chainNode: any, stage = 1): EvolutionNode => 
     name: chainNode.species.name,
     id,
     condition,
+    item,
     evolves_to: children,
   };
 };

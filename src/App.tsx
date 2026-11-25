@@ -32,6 +32,7 @@ import { PokedexGridView } from './components/PokedexGridView';
 import { TcgExplorerView } from './components/TcgExplorerView';
 import { TcgAlbumView } from './components/TcgAlbumView';
 import { WhoIsThatPokemon } from './components/WhoIsThatPokemon';
+import { FormSelectorStrip } from './components/FormSelectorStrip';
 
 function App() {
   const [query, setQuery] = useState('');
@@ -1439,9 +1440,20 @@ function App() {
                 <div key={child.name} className="flex items-center gap-2 sm:gap-4">
                   {/* Arrow and condition badge */}
                   <div className="flex flex-col items-center justify-center min-w-[60px] sm:min-w-[80px]">
+                    {child.item && (
+                      <img
+                        src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/${child.item}.png`}
+                        alt={child.item.replace(/-/g, ' ')}
+                        title={child.condition || child.item.replace(/-/g, ' ')}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                        className="w-7 h-7 sm:w-8 sm:h-8 object-contain drop-shadow-[0_2px_6px_rgba(255,255,255,0.18)] mb-0.5 transition-transform hover:scale-125"
+                      />
+                    )}
                     {child.condition && (
                       <span
-                        className="text-[9px] font-semibold text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full mb-1 text-center max-w-[85px] sm:max-w-[110px] leading-tight"
+                        className="text-[9px] font-semibold text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full mb-1 text-center max-w-[85px] sm:max-w-[110px] leading-tight capitalize"
                         title={child.condition}
                       >
                         {child.condition}
@@ -2183,10 +2195,32 @@ function App() {
                                 ? pokemonForms[selectedFormIndex].spriteShiny
                                 : pokemonForms[selectedFormIndex].spriteDefault)
                             : isShiny
-                            ? (currentPokemonData.sprites.other['official-artwork'].front_shiny || currentPokemonData.sprites.front_shiny || currentPokemonData.sprites.other['official-artwork'].front_default || currentPokemonData.sprites.front_default)
-                            : (currentPokemonData.sprites.other['official-artwork'].front_default || currentPokemonData.sprites.front_default)
+                            ? (
+                                currentPokemonData.sprites.other['official-artwork'].front_shiny ||
+                                currentPokemonData.sprites.front_shiny ||
+                                currentPokemonData.sprites.other['official-artwork'].front_default ||
+                                currentPokemonData.sprites.front_default ||
+                                pokemon!.sprites.other['official-artwork'].front_shiny ||
+                                pokemon!.sprites.other['official-artwork'].front_default ||
+                                pokemon!.sprites.front_default
+                              )
+                            : (
+                                currentPokemonData.sprites.other['official-artwork'].front_default ||
+                                currentPokemonData.sprites.front_default ||
+                                pokemon!.sprites.other['official-artwork'].front_default ||
+                                pokemon!.sprites.front_default
+                              )
                         }
                         alt={currentPokemonData.name}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          const fallback =
+                            pokemon?.sprites.other['official-artwork'].front_default ||
+                            pokemon?.sprites.front_default;
+                          if (fallback && target.src !== fallback) {
+                            target.src = fallback;
+                          }
+                        }}
                         className="w-36 h-36 object-contain relative z-10 drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)] transition-transform duration-500 hover:scale-105 mt-2"
                       />
 
@@ -2252,108 +2286,57 @@ function App() {
                       </div>
                     </div>
 
-                    {/* Cosmetic Forms / Motifs Strip (Vivillon, Unown, Alcremie, Furfrou, etc.) */}
+                    {/* Cosmetic Forms / Motifs Selector (Vivillon, Unown, Alcremie, Furfrou, etc.) */}
                     {pokemonForms.length > 1 && (
-                      <div className="space-y-2 p-3.5 bg-slate-950/40 border border-slate-850 rounded-3xl animate-fade-in">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                            <span>🦋</span>
-                            <span>Formas y Motivos ({pokemonForms.length})</span>
-                          </span>
-                          <span className="text-[11px] font-bold text-rose-400">
-                            {selectedFormIndex !== null && pokemonForms[selectedFormIndex] ? pokemonForms[selectedFormIndex].displayName : ''}
-                          </span>
-                        </div>
-
-                        {/* Horizontal Scrollable Motifs Badges with Mini Sprites */}
-                        <div className="flex gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
-                          {pokemonForms.map((form, idx) => (
-                            <button
-                              key={form.name}
-                              type="button"
-                              onClick={() => setSelectedFormIndex(idx)}
-                              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
-                                selectedFormIndex === idx
-                                  ? 'bg-rose-500/25 text-white border-rose-500/50 shadow-md shadow-rose-500/10 scale-105'
-                                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                              }`}
-                            >
-                              <img
-                                src={isShiny && form.spriteShiny ? form.spriteShiny : form.spriteDefault}
-                                alt={form.displayName}
-                                className="w-7 h-7 object-contain drop-shadow-sm"
-                                loading="lazy"
-                              />
-                              <span>{form.displayName}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <FormSelectorStrip
+                        title="Formas y Motivos"
+                        icon="🦋"
+                        accent="rose"
+                        items={pokemonForms.map((form) => ({
+                          key: form.name,
+                          label: form.displayName,
+                          sprite: isShiny && form.spriteShiny ? form.spriteShiny : form.spriteDefault,
+                        }))}
+                        activeIndex={selectedFormIndex ?? 0}
+                        onSelect={(idx) => setSelectedFormIndex(idx)}
+                      />
                     )}
 
-                    {/* Multi-Form Varieties Selector Strip (Minior, Rotom, Deoxys, etc. when forms > 2) */}
+                    {/* Multi-Form Varieties Selector (Minior, Rotom, Deoxys, Pikachu Caps, etc. when forms > 2) */}
                     {formVarieties.length > 2 && (
-                      <div className="space-y-2 p-3.5 bg-slate-950/40 border border-slate-850 rounded-3xl animate-fade-in">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                            <span>🪐</span>
-                            <span>Formas y Variantes ({formVarieties.length + 1})</span>
-                          </span>
-                          <span className="text-[11px] font-bold text-sky-400">
-                            {activeFormIndex === null
-                              ? 'Forma Base / Meteorito'
-                              : formVarieties[activeFormIndex]?.displayName || ''}
-                          </span>
-                        </div>
-
-                        {/* Horizontal Scrollable Badges with Mini Sprites */}
-                        <div className="flex gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
-                          {/* Base Form Badge */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (activeFormIndex !== null) {
-                                handleFormToggle(activeFormIndex);
-                              }
-                            }}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
-                              activeFormIndex === null
-                                ? 'bg-sky-500/25 text-white border-sky-500/50 shadow-md shadow-sky-500/10 scale-105'
-                                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                            }`}
-                          >
-                            <img
-                              src={isShiny && pokemon!.sprites.front_shiny ? pokemon!.sprites.front_shiny : pokemon!.sprites.front_default}
-                              alt={pokemon!.species.name || pokemon!.name}
-                              className="w-7 h-7 object-contain drop-shadow-sm"
-                              loading="lazy"
-                            />
-                            <span>Forma Base</span>
-                          </button>
-
-                          {/* Each Alternate Form Badge */}
-                          {formVarieties.map((form, idx) => (
-                            <button
-                              key={form.name}
-                              type="button"
-                              onClick={() => handleFormToggle(idx)}
-                              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 active:scale-95 ${
-                                activeFormIndex === idx
-                                  ? 'bg-sky-500/25 text-white border-sky-500/50 shadow-md shadow-sky-500/10 scale-105'
-                                  : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                              }`}
-                            >
-                              <img
-                                src={isShiny && form.spriteShiny ? form.spriteShiny : (form.spriteDefault || '')}
-                                alt={form.displayName || form.name}
-                                className="w-7 h-7 object-contain drop-shadow-sm"
-                                loading="lazy"
-                              />
-                              <span>{form.displayName || form.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <FormSelectorStrip
+                        title="Formas y Variantes"
+                        icon="🪐"
+                        accent="sky"
+                        fallbackSprite={
+                          isShiny && pokemon!.sprites.front_shiny
+                            ? pokemon!.sprites.front_shiny
+                            : pokemon!.sprites.front_default
+                        }
+                        items={[
+                          {
+                            key: 'base-form',
+                            label: 'Forma Base',
+                            sprite:
+                              isShiny && pokemon!.sprites.front_shiny
+                                ? pokemon!.sprites.front_shiny
+                                : pokemon!.sprites.front_default,
+                          },
+                          ...formVarieties.map((form) => ({
+                            key: form.name,
+                            label: form.displayName || form.name,
+                            sprite: isShiny && form.spriteShiny ? form.spriteShiny : form.spriteDefault || '',
+                          })),
+                        ]}
+                        activeIndex={activeFormIndex === null ? 0 : activeFormIndex + 1}
+                        onSelect={(idx) => {
+                          if (idx === 0) {
+                            if (activeFormIndex !== null) handleFormToggle(activeFormIndex);
+                          } else {
+                            if (activeFormIndex !== idx - 1) handleFormToggle(idx - 1);
+                          }
+                        }}
+                      />
                     )}
 
                     {/* Pokédex Entry & Physical Attributes */}

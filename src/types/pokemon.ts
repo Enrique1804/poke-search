@@ -73,6 +73,7 @@ export interface EvolutionNode {
   name: string;
   id: number;
   condition?: string;
+  item?: string;
   evolves_to: EvolutionNode[];
 }
 
